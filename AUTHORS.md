@@ -1,9 +1,8 @@
 # Authors and Stewardship
 
-## Original creation credit
+## Authors
 
-- **Mike “Mizzy” Barrera** — joint origin credit; system architecture and agent identity/action-authority decision infrastructure.
-- **Monique Abrams** — joint origin credit and project stewardship.
+**Mike “Mizzy” Barrera and Monique Abrams** — joint authors and co-architects.
 
 ## Current stewardship
 
