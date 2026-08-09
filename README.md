@@ -2,9 +2,11 @@
 
 **Deterministic Agent Identity and Action-Authority Reference Stack**
 
+> **Status:** immutable full-stack reference released as [`v0.2.1-full-stack-reference`](https://github.com/ordin-systems/zkyc-core/releases/tag/v0.2.1-full-stack-reference). This patch preserves the v0.2 runtime and evidence boundaries while adding the canonical joint author/co-architect credit.
+
 zKYC Core evaluates a principal, credential and requested action against versioned policy; returns a reason-coded `ALLOW`, `DENY` or `STEP_UP`; and supports bound, one-time authority consumption.
 
-The v0.2 successor adds a sanitized full-stack demonstration around the audited core:
+The v0.2 full-stack reference adds a sanitized demonstration around the audited core:
 
 - Hono reference API;
 - browser-compatible TypeScript SDK;

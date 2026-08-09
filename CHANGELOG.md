@@ -2,6 +2,18 @@
 
 All notable changes to the bounded public reference implementation are recorded here.
 
+## 0.2.1-full-stack-reference — 2026-08-09
+
+### Corrected
+
+- credited Mike “Mizzy” Barrera and Monique Abrams together as joint authors and co-architects;
+- removed separate responsibility labels from project-level authorship credit;
+- updated patch-release metadata without changing runtime behavior or trust boundaries.
+
+### Lineage
+
+- `v0.2.0-full-stack-reference` and `v0.1.0-reference` remain immutable and unchanged.
+
 ## 0.2.0-full-stack-reference — 2026-08-09
 
 ### Added
