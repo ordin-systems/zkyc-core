@@ -2,7 +2,7 @@
 
 ## Project continuity
 
-zKYC Core originated in the zKYC project and is credited jointly to Mike “Mizzy” Barrera and Monique Abrams. Mike served as the system architect for the agent identity and action-authority decision infrastructure. Canonical stewardship and publication responsibility transferred to ORDIN in 2026.
+zKYC Core originated in the zKYC project and is credited jointly to Mike “Mizzy” Barrera and Monique Abrams. Canonical stewardship and publication responsibility transferred to ORDIN in 2026.
 
 ## Current canonical owner
 
