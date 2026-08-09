@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 const root = process.argv[2] ?? new URL("..", import.meta.url).pathname;
 const thisFile = fileURLToPath(import.meta.url);
 const ignoredDirectories = new Set([".git", "node_modules", "dist", "coverage"]);
-const forbiddenNames = new Set([".env", "id_rsa", "id_ed25519"]);
+const forbiddenNames = new Set([".npmrc", ".yarnrc", ".pypirc", ".netrc", "id_rsa", "id_ed25519"]);
 const forbiddenExtensions = new Set([".pem", ".p12", ".pfx", ".key"]);
-const textExtensions = new Set([".ts", ".mjs", ".js", ".json", ".md", ".yml", ".yaml", ".txt"]);
+const textExtensions = new Set([".ts", ".tsx", ".mjs", ".js", ".json", ".md", ".yml", ".yaml", ".txt", ".css", ".html"]);
+const codeExtensions = new Set([".ts", ".tsx", ".mjs", ".js"]);
+const codeRoots = ["src", "apps", "packages"];
 const forbiddenPatterns = [
   { label: "absolute macOS private path", pattern: /\/Users\/[A-Za-z0-9._-]+\// },
   { label: "absolute Windows private path", pattern: /[A-Za-z]:\\Users\\[^\\]+\\/ },
@@ -33,14 +35,19 @@ async function walk(directory) {
       continue;
     }
     if (path === thisFile) continue;
-    if (forbiddenNames.has(basename(path)) || forbiddenExtensions.has(extname(path))) {
+    const filename = basename(path);
+    if (filename === ".env" || filename.startsWith(".env.") ||
+      forbiddenNames.has(filename) || forbiddenExtensions.has(extname(path))) {
       failures.push(`${display}: forbidden sensitive filename`);
       continue;
     }
-    if (!textExtensions.has(extname(path)) && basename(path) !== ".gitignore") continue;
+    if (!textExtensions.has(extname(path)) && extname(path) !== "") continue;
     const content = await readFile(path, "utf8");
     for (const { label, pattern, codeOnly = false } of forbiddenPatterns) {
-      if (codeOnly && !display.startsWith(`src${process.platform === "win32" ? "\\" : "/"}`)) continue;
+      const separator = process.platform === "win32" ? "\\" : "/";
+      const isWorkspaceCode = codeExtensions.has(extname(path)) &&
+        codeRoots.some((codeRoot) => display.startsWith(`${codeRoot}${separator}`));
+      if (codeOnly && !isWorkspaceCode) continue;
       if (pattern.test(content)) failures.push(`${display}: ${label}`);
     }
   }

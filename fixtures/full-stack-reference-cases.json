@@ -1,0 +1,160 @@
+[
+  {
+    "name": "full-stack-allow",
+    "credential": {
+      "principal": {
+        "id": "principal:fixture-allow",
+        "affiliations": [
+          {
+            "organizationId": "organization:fixture",
+            "role": "member"
+          }
+        ]
+      },
+      "capabilities": [
+        "records:read"
+      ],
+      "expiresAt": "2026-06-01T01:00:00.000Z"
+    },
+    "evaluation": {
+      "action": "records:read",
+      "resourceId": "record:fixture-allow",
+      "actionContext": {
+        "fields": [
+          "status"
+        ],
+        "purpose": "fixture-review"
+      },
+      "policy": {
+        "id": "policy:fixture-allow-v02",
+        "rules": [
+          {
+            "action": "records:read",
+            "actionSensitivity": "ROUTINE",
+            "requiredCapabilities": [
+              "records:read"
+            ],
+            "requiredAffiliations": [
+              {
+                "organizationId": "organization:fixture",
+                "role": "member"
+              }
+            ],
+            "effect": "ALLOW"
+          }
+        ]
+      },
+      "issueReceipt": true,
+      "receiptExpiresAt": "2026-06-01T00:20:00.000Z"
+    },
+    "expected": {
+      "outcome": "ALLOW",
+      "reasonCode": "POLICY_ALLOW",
+      "hasReceipt": true
+    }
+  },
+  {
+    "name": "full-stack-deny",
+    "credential": {
+      "principal": {
+        "id": "principal:fixture-deny",
+        "affiliations": [
+          {
+            "organizationId": "organization:fixture",
+            "role": "member"
+          }
+        ]
+      },
+      "capabilities": [
+        "records:delete"
+      ],
+      "expiresAt": "2026-06-01T01:00:00.000Z"
+    },
+    "evaluation": {
+      "action": "records:delete",
+      "resourceId": "record:fixture-deny",
+      "actionContext": {
+        "reason": "fixture-cleanup"
+      },
+      "policy": {
+        "id": "policy:fixture-deny-v02",
+        "rules": [
+          {
+            "action": "records:delete",
+            "actionSensitivity": "CRITICAL",
+            "requiredCapabilities": [
+              "records:delete"
+            ],
+            "requiredAffiliations": [
+              {
+                "organizationId": "organization:fixture",
+                "role": "member"
+              }
+            ],
+            "effect": "DENY"
+          }
+        ]
+      },
+      "issueReceipt": true,
+      "receiptExpiresAt": "2026-06-01T00:20:00.000Z"
+    },
+    "expected": {
+      "outcome": "DENY",
+      "reasonCode": "POLICY_DENY",
+      "hasReceipt": false
+    }
+  },
+  {
+    "name": "full-stack-step-up",
+    "credential": {
+      "principal": {
+        "id": "principal:fixture-step-up",
+        "affiliations": [
+          {
+            "organizationId": "organization:fixture",
+            "role": "member"
+          }
+        ]
+      },
+      "capabilities": [
+        "records:export"
+      ],
+      "expiresAt": "2026-06-01T01:00:00.000Z"
+    },
+    "evaluation": {
+      "action": "records:export",
+      "resourceId": "dataset:fixture-step-up",
+      "actionContext": {
+        "destination": "reviewer",
+        "rows": 25
+      },
+      "policy": {
+        "id": "policy:fixture-step-up-v02",
+        "rules": [
+          {
+            "action": "records:export",
+            "actionSensitivity": "SENSITIVE",
+            "requiredCapabilities": [
+              "records:export"
+            ],
+            "requiredAffiliations": [
+              {
+                "organizationId": "organization:fixture",
+                "role": "member"
+              }
+            ],
+            "effect": "STEP_UP",
+            "approverCapability": "approval:records-export"
+          }
+        ]
+      },
+      "issueReceipt": true,
+      "receiptExpiresAt": "2026-06-01T00:20:00.000Z"
+    },
+    "expected": {
+      "outcome": "STEP_UP",
+      "reasonCode": "HUMAN_APPROVAL_REQUIRED",
+      "hasReceipt": false
+    }
+  }
+]

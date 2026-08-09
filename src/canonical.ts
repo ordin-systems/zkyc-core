@@ -13,7 +13,7 @@ function normalize(value: unknown): unknown {
     if (prototype !== Object.prototype && prototype !== null) {
       throw new DomainValidationError("canonical data must contain only plain objects");
     }
-    const result: Record<string, unknown> = {};
+    const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
     for (const key of Object.keys(value as Record<string, unknown>).sort()) {
       const child = (value as Record<string, unknown>)[key];
       if (child === undefined) throw new DomainValidationError("canonical data cannot contain undefined");

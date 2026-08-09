@@ -2,9 +2,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 
 const root = new URL("..", import.meta.url).pathname;
-const includedRoots = ["src", "test", "fixtures", "scripts"];
+const includedRoots = ["src", "test", "fixtures", "scripts", "apps", "packages"];
 const rootFiles = ["package.json", "tsconfig.json", ".gitignore"];
-const textExtensions = new Set([".ts", ".mjs", ".json"]);
+const textExtensions = new Set([".ts", ".tsx", ".mjs", ".js", ".json", ".css", ".html"]);
+const ignoredDirectories = new Set([".git", "node_modules", "dist", "coverage"]);
 const failures = [];
 
 async function checkFile(path) {
@@ -20,6 +21,7 @@ async function checkFile(path) {
 
 async function walk(path) {
   for (const entry of await readdir(path, { withFileTypes: true })) {
+    if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
     const child = join(path, entry.name);
     if (entry.isDirectory()) await walk(child);
     else if (textExtensions.has(extname(entry.name))) await checkFile(child);

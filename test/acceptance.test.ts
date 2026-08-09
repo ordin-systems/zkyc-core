@@ -7,9 +7,11 @@ import {
   DomainValidationError,
   HumanStepUpService,
   InMemoryAtomicNonceStore,
+  canonicalJson,
   createPolicy,
   createPrincipal,
   evaluateAccess,
+  sha256Version,
   signReceipt,
   verifyAndConsumeReceipt,
   verifyReceipt,
@@ -806,4 +808,10 @@ test("21 checked-in fixtures execute through the public API", async () => {
     assert.equal(decision.outcome, fixture.expected.outcome, fixture.name);
     assert.equal(decision.reasonCode, fixture.expected.reasonCode, fixture.name);
   }
+});
+
+test("22 canonical JSON preserves __proto__ as data and prevents context-hash collision", () => {
+  const withProtoKey = JSON.parse('{"__proto__":{"admin":true}}') as Record<string, unknown>;
+  assert.equal(canonicalJson(withProtoKey), '{"__proto__":{"admin":true}}');
+  assert.notEqual(sha256Version(withProtoKey), sha256Version({}));
 });

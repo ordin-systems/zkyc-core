@@ -1,8 +1,8 @@
 {
   "name": "@ordin/zkyc-core-reference",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Deterministic local zKYC authority reference core",
+  "description": "Deterministic zKYC authority core with sanitized full-stack reference adapters",
   "license": "UNLICENSED",
   "repository": {
     "type": "git",
@@ -10,7 +10,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -24,16 +24,35 @@
     "dist/src",
     "fixtures"
   ],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "format:check": "node scripts/format-check.mjs",
     "security:check": "node scripts/security-check.mjs .",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build --silent && node --test dist/test/acceptance.test.js",
+    "typecheck:workspaces": "npm run build --silent && npm run typecheck -w @ordin/zkyc-core-api-reference && npm run build -w @ordin/zkyc-core-api-reference --silent && npm run typecheck -w @ordin/zkyc-sdk-reference && npm run build -w @ordin/zkyc-sdk-reference --silent && npm run typecheck -w @ordin/zkyc-operator-ui-reference",
+    "test": "npm run test:core && npm run test:api && npm run test:sdk && npm run test:ui && npm run test:security",
+    "test:core": "npm run build --silent && node --test dist/test/acceptance.test.js",
+    "test:api": "npm run build --silent && npm run test -w @ordin/zkyc-core-api-reference",
+    "test:sdk": "npm run build --silent && npm run build -w @ordin/zkyc-core-api-reference --silent && npm run test -w @ordin/zkyc-sdk-reference",
+    "test:ui": "npm run build -w @ordin/zkyc-sdk-reference --silent && npm run test -w @ordin/zkyc-operator-ui-reference",
+    "test:security": "node --test scripts/security-check.test.mjs",
     "build": "tsc",
-    "verify": "npm run format:check && npm run security:check && npm run typecheck && npm test && npm run build && npm audit --audit-level=high"
+    "build:workspaces": "npm run build --silent && npm run build -w @ordin/zkyc-core-api-reference && npm run build -w @ordin/zkyc-sdk-reference && npm run build -w @ordin/zkyc-operator-ui-reference",
+    "build:all": "npm run build && npm run build:workspaces",
+    "package:check": "node scripts/package-check.mjs",
+    "verify": "npm run format:check && npm run security:check && npm run typecheck && npm run typecheck:workspaces && npm test && npm run build:all && npm run package:check && npm audit --audit-level=high"
   },
   "devDependencies": {
     "@types/node": "22.15.3",
-    "typescript": "5.8.3"
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "5.8.3",
+    "vite": "8.2.1"
   }
 }
