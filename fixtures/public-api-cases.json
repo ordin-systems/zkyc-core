@@ -1,0 +1,157 @@
+[
+  {
+    "name": "fixture-low-risk-allow",
+    "principal": {
+      "id": "principal:fixture-alice",
+      "affiliations": [
+        {
+          "organizationId": "organization:fixture",
+          "role": "member"
+        }
+      ]
+    },
+    "credential": {
+      "id": "credential:fixture-alice",
+      "capabilities": [
+        "records:read"
+      ],
+      "issuedAt": "2026-06-01T00:00:00.000Z",
+      "expiresAt": "2026-06-01T01:00:00.000Z",
+      "unverifiedMetadata": {
+        "zkPassProofId": "zkpass:context-only"
+      }
+    },
+    "action": "records:read",
+    "resourceId": "record:fixture-1",
+    "actionContext": {
+      "purpose": "fixture-review",
+      "fields": [
+        "status"
+      ]
+    },
+    "policy": {
+      "id": "policy:fixture-allow",
+      "rules": [
+        {
+          "action": "records:read",
+          "actionSensitivity": "ROUTINE",
+          "requiredCapabilities": [
+            "records:read"
+          ],
+          "requiredAffiliations": [
+            {
+              "organizationId": "organization:fixture",
+              "role": "member"
+            }
+          ],
+          "effect": "ALLOW"
+        }
+      ]
+    },
+    "at": "2026-06-01T00:10:00.000Z",
+    "expected": {
+      "outcome": "ALLOW",
+      "reasonCode": "POLICY_ALLOW"
+    }
+  },
+  {
+    "name": "fixture-explicit-deny",
+    "principal": {
+      "id": "principal:fixture-denied",
+      "affiliations": [
+        {
+          "organizationId": "organization:fixture",
+          "role": "member"
+        }
+      ]
+    },
+    "credential": {
+      "id": "credential:fixture-denied",
+      "capabilities": [
+        "records:delete"
+      ],
+      "issuedAt": "2026-06-01T00:00:00.000Z",
+      "expiresAt": "2026-06-01T01:00:00.000Z"
+    },
+    "action": "records:delete",
+    "resourceId": "record:fixture-2",
+    "actionContext": {
+      "reason": "cleanup"
+    },
+    "policy": {
+      "id": "policy:fixture-deny",
+      "rules": [
+        {
+          "action": "records:delete",
+          "actionSensitivity": "CRITICAL",
+          "requiredCapabilities": [
+            "records:delete"
+          ],
+          "requiredAffiliations": [
+            {
+              "organizationId": "organization:fixture",
+              "role": "member"
+            }
+          ],
+          "effect": "DENY"
+        }
+      ]
+    },
+    "at": "2026-06-01T00:10:00.000Z",
+    "expected": {
+      "outcome": "DENY",
+      "reasonCode": "POLICY_DENY"
+    }
+  },
+  {
+    "name": "fixture-sensitive-step-up",
+    "principal": {
+      "id": "principal:fixture-exporter",
+      "affiliations": [
+        {
+          "organizationId": "organization:fixture",
+          "role": "member"
+        }
+      ]
+    },
+    "credential": {
+      "id": "credential:fixture-exporter",
+      "capabilities": [
+        "records:export"
+      ],
+      "issuedAt": "2026-06-01T00:00:00.000Z",
+      "expiresAt": "2026-06-01T01:00:00.000Z"
+    },
+    "action": "records:export",
+    "resourceId": "dataset:fixture-3",
+    "actionContext": {
+      "rows": 25,
+      "destination": "reviewer"
+    },
+    "policy": {
+      "id": "policy:fixture-step-up",
+      "rules": [
+        {
+          "action": "records:export",
+          "actionSensitivity": "SENSITIVE",
+          "requiredCapabilities": [
+            "records:export"
+          ],
+          "requiredAffiliations": [
+            {
+              "organizationId": "organization:fixture",
+              "role": "member"
+            }
+          ],
+          "effect": "STEP_UP",
+          "approverCapability": "approval:records-export"
+        }
+      ]
+    },
+    "at": "2026-06-01T00:10:00.000Z",
+    "expected": {
+      "outcome": "STEP_UP",
+      "reasonCode": "HUMAN_APPROVAL_REQUIRED"
+    }
+  }
+]

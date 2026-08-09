@@ -2,42 +2,53 @@
 
 **Agent Identity and Action-Authority Decision Infrastructure**
 
-> **Publication status:** Evidence landing page. The canonical public reference source, automated verification, public CI, provenance documentation, and release artifacts are being prepared. This repository does not yet contain the public reference source.
+zKYC Core is a bounded TypeScript reference implementation for deterministic agent identity and action-authority decisions. It evaluates a principal, credential and requested action against a versioned policy; returns a reason-coded `ALLOW`, `DENY` or `STEP_UP`; and can issue a signed, one-time authorization receipt.
 
-zKYC Core is an agent identity and action-authority decision reference implementation originated and architected by [Mike “Mizzy” Barrera](https://github.com/mizzysworld) during his tenure as Chief Agentic Officer at zKYC. Stewardship and canonical maintenance of the technology transferred to [ORDIN](https://github.com/ordin-systems) in 2026.
+## What this release proves
 
-## Current audited implementation boundary
+- deterministic principal, affiliation, capability and permission evaluation;
+- credential issuance, expiry and revocation;
+- fail-closed `ALLOW`, `DENY` and `STEP_UP` decisions;
+- human approval, rejection and expiry for escalated actions;
+- HMAC-SHA256 decision receipts with timing-safe signature verification;
+- one-time nonce consumption through an explicit atomic-store contract;
+- deterministic fixtures and automated negative-path and concurrency tests.
 
-The current private publication candidate includes:
+## Quick verification
 
-- Hono API
-- React/Vite operator interface
-- TypeScript SDK source
-- Configurable action tiers
-- Deterministic `ALLOW`, `DENY`, and `STEP_UP` outcomes
-- Reason-coded decision logs
-- Human resolution for escalated cases
-- HMAC-signed decision receipts
-- Replay-tracking metadata
-- `zkPassProofId` as contextual integration input
+```bash
+npm ci
+npm run format:check
+npm run security:check
+npm run typecheck
+npm test
+npm run build
+npm run verify
+npm audit --audit-level=high
+```
 
-The audited implementation accepts `zkPassProofId` as context; it does **not** verify a zero-knowledge proof.
+## Evidence chain
 
-## Hardening required before a public reference release
+`trusted authority caller → deterministic evaluator → ALLOW decision → signed receipt → complete binding verification → one-time consumption`
 
-- Enforced credential expiry and revocation semantics
-- Receipt verification
-- Atomic replay protection
-- Deterministic fixtures and automated API/SDK tests
-- Clean locked installation and coherent workspace commands
-- SDK build repair
-- Dependency-security remediation
-- Public CI-backed UI, API, and SDK builds
-- Authentication and per-user authorization appropriate to the reference scope
-- Architecture, threat model, decision-lifecycle, provenance, authorship, limitations, and verification documentation
+`trusted authority caller → STEP_UP decision → human resolution → complete authorization verification → one-time consumption`
 
-Until those gates pass, this landing page should not be interpreted as evidence that the target hardened release already exists.
+See:
 
-## Ownership and provenance
+- `docs/architecture.md`
+- `docs/threat-model.md`
+- `docs/atomic-store-contract.md`
+- `docs/evidence-map.md`
+- `docs/reviewer-walkthrough.md`
+- `REPRODUCIBILITY.md`
+- `CLAIMS_AND_LIMITATIONS.md`
+- `PROVENANCE.md`
+- `AUTHORS.md`
 
-ORDIN is the canonical owner and maintainer. The public release will include `PROVENANCE.md` and `AUTHORS.md` documenting original context, architecture, stewardship transfer, current maintenance responsibility, publication rights, and verified contribution boundaries.
+## Important boundaries
+
+This is a **reference implementation**, not evidence of production deployment, adoption or external validation. The included store is an in-memory reference adapter; production persistence must provide the same atomic consume contract. `signReceipt()` and `HumanStepUpService.createRequest()` are trusted issuer-side primitives: callers must supply corresponding evaluator output, and a structurally valid plain object does not independently prove policy-decision provenance. Receipt consumers must provide complete expected bindings. This release does not include the historical demo UI, fixed-user middleware, webhooks, external-LLM policy authority, x402 or real-funds execution.
+
+A `zkPassProofId` or similar proof identifier may be preserved as contextual metadata. zKYC Core does **not** verify a zero-knowledge proof.
+
+No license is granted unless and until ORDIN publishes an explicit license file.
