@@ -23,7 +23,7 @@ The one-command verification performs:
 5. strict API, SDK and UI typechecks;
 6. API, SDK and React cockpit interaction tests;
 7. core, API, SDK and React/Vite production builds;
-8. package manifest/artifact verification plus an offline isolated core/API archive install and import;
+8. package manifest/artifact verification plus an isolated core/API archive install and import;
 9. extensionless-file publication-scanner regression;
 10. dependency audit.
 

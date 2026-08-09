@@ -55,7 +55,7 @@ try {
   run(
     npmCommand,
     [
-      "install", "--offline", "--ignore-scripts", "--package-lock=false",
+      "install", "--prefer-offline", "--ignore-scripts", "--package-lock=false",
       join(temporary, coreArchive), join(temporary, apiArchive),
     ],
     consumer,

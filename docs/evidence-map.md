@@ -29,7 +29,7 @@
 | Browser-compatible typed SDK, exact response validation and transport/error contract | `packages/sdk/src/index.ts`, `packages/sdk/src/validation.ts` | SDK tests 1–8, including per-field malformed credential rejection in test 5 |
 | React/Vite reviewer cockpit and authority-state interaction flow | `apps/operator-ui/src/App.tsx`, `apps/operator-ui/src/scenarios.ts` | UI tests 1–2, strict typecheck and production Vite build |
 | CI-backed core/API/SDK/UI builds | `package.json`, `.github/workflows/ci.yml` | `npm run verify` on Node 20/22 |
-| Reproducible package and CI | `package-lock.json`, `package.json`, `.github/workflows/ci.yml`, `REPRODUCIBILITY.md`, `scripts/package-check.mjs` | `npm ci --ignore-scripts`, `npm run verify`, archive entry-point checks, offline core/API archive install and import, Node 20/22 CI matrix |
+| Reproducible package and CI | `package-lock.json`, `package.json`, `.github/workflows/ci.yml`, `REPRODUCIBILITY.md`, `scripts/package-check.mjs` | `npm ci --ignore-scripts`, `npm run verify`, archive entry-point checks, isolated core/API archive install and import, Node 20/22 CI matrix |
 | Extensionless publication files remain inside secret/private-path scanning | `scripts/security-check.mjs`, `scripts/security-check.test.mjs` | Security regression test 1 |
 | Provenance and stewardship | `PROVENANCE.md`, `AUTHORS.md`, `NOTICE.md` | Repository readback |
 
