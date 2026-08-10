@@ -2,13 +2,14 @@
 
 ## Supported v0.3 candidate claims
 
-At executable baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`, the integrated local reference candidate supports these bounded claims:
+At executable baseline `55d15981cf7f45e441205eb96f5aae79e58d00ae`, the integrated local reference candidate supports these bounded claims:
 
 - exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
 - credential v2 binding of principal ID/type, credential-bound affiliations, capabilities, exact actions, exact resources, issuer, validity, and scope hash;
 - explicit `DIRECT` and `DELEGATED` authority modes;
 - registered one-hop delegations that bind distinct grantor and delegate identities, the grantor credential, exact policy ID/version, time bounds, and attenuated capability/action/resource scope;
-- separate delegate identity and grantor credentials, without transfer of grantor affiliations or delegated `delegation:issue` authority;
+- separate, non-reusable delegate identity and grantor credentials, without transfer of grantor affiliations or delegated `delegation:issue` authority;
+- immutable startup policy registries with exact `(id, version)` resolution and live policy outcome re-evaluation at authorizing transitions;
 - deterministic, reason-coded `ALLOW`, `DENY`, and `STEP_UP` decisions;
 - current credential, grantor credential, delegation, policy, expiry, and revocation checks where applicable;
 - human-only step-up approval/rejection with the required capability and exact `step-up:resolve` action/resource scope;
@@ -20,9 +21,9 @@ At executable baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`, the integrate
 - operator and zkYA React/Vite reference UIs;
 - deterministic core fixtures plus versioned full-stack transcripts executed by API and SDK tests;
 - a real local Chromium test through the built zkYA UI, SDK, and loopback API;
-- fail-closed publication/archive scanning and source-derived package allowlists exercised through blank-consumer imports and an installed API probe.
+- fail-closed recursive publication/archive scanning, strict tar-padding validation, and source-derived package allowlists exercised through blank-consumer imports and an installed API probe.
 
-Current behavioral counts are core 45, API/server 13, SDK 10, operator UI 3, zkYA component 9, scanner regression 7, release-tooling regression 6, and Chromium E2E 1. Typechecks, builds, formatting, security scanning, package verification, and dependency audit are checks rather than tests.
+Current behavioral counts are core 46, API/server 13, SDK 12, operator UI 3, zkYA component 9, scanner regression 9, release-tooling regression 7, and Chromium E2E 1. Typechecks, builds, formatting, security scanning, package verification, and dependency audit are checks rather than tests.
 
 ## Non-claims
 

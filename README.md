@@ -2,7 +2,7 @@
 
 **Deterministic Agent Identity and Action-Authority Reference Stack**
 
-> **Status:** integrated local `v0.3.0` reference candidate. The executable baseline is commit `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`; this documentation-only successor does not change its runtime. This candidate has not been pushed, merged, tagged, released, published, or independently approved.
+> **Status:** integrated local `v0.3.0` reference candidate. The executable baseline is commit `55d15981cf7f45e441205eb96f5aae79e58d00ae`; this documentation-only successor does not change its runtime. This candidate has not been pushed, merged, tagged, released, published, or independently approved.
 
 zKYC Core evaluates typed principals and direct or delegated authority against exact credential, action, resource, and versioned-policy scope. It returns reason-coded `ALLOW`, `DENY`, or `STEP_UP` decisions and supports one-time, authority-bound consumption.
 
@@ -51,7 +51,7 @@ npm audit --audit-level=high
 
 The browser test requires Playwright Chromium. If it is not already present, run `npx --no-install playwright install chromium` after `npm ci --ignore-scripts` and before `npm run test:browser`. CI uses `npx --no-install playwright install --with-deps chromium`. Browser installation is an environment prerequisite, not evidence that the test passed.
 
-Current executable test inventory for the baseline is: core 45, API/server 13, SDK 10, operator UI 3, zkYA component 9, scanner regression 7, release-tooling regression 6, and Chromium E2E 1.
+Current executable test inventory for the baseline is: core 46, API/server 13, SDK 12, operator UI 3, zkYA component 9, scanner regression 9, release-tooling regression 7, and Chromium E2E 1.
 
 ## Run the local interfaces
 

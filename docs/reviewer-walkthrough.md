@@ -25,15 +25,15 @@ If Playwright Chromium is absent, run `npx --no-install playwright install chrom
 
 ## 2. Confirm behavioral counts
 
-Expected at executable baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`:
+Expected at executable baseline `55d15981cf7f45e441205eb96f5aae79e58d00ae`:
 
-- core 45;
+- core 46;
 - API/server 13;
-- SDK 10;
+- SDK 12;
 - operator UI 3;
 - zkYA component 9;
-- scanner regression 7;
-- release-tooling regression 6;
+- scanner regression 9;
+- release-tooling regression 7;
 - Chromium E2E 1.
 
 This walkthrough is a forward documentation-only successor to that runtime baseline.

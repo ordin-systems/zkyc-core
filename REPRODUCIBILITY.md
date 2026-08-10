@@ -8,7 +8,7 @@
 
 ## Exact candidate scope
 
-The v0.3 executable baseline is `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`. This documentation is a forward documentation-only successor to that runtime. Neither identifier is a release tag.
+The v0.3 executable baseline is `55d15981cf7f45e441205eb96f5aae79e58d00ae`. This documentation is a forward documentation-only successor to that runtime. Neither identifier is a release tag.
 
 ## Clean local verification
 
@@ -37,13 +37,13 @@ That download is an environment prerequisite. It is not a passing test or releas
 
 ## Behavioral test inventory
 
-- core: 45;
+- core: 46;
 - API/server: 13;
-- SDK: 10;
+- SDK: 12;
 - operator UI: 3;
 - zkYA component: 9;
-- scanner regression: 7;
-- release-tooling regression: 6;
+- scanner regression: 9;
+- release-tooling regression: 7;
 - Chromium E2E: 1.
 
 Formatting, security scanning, core/workspace typechecks, core/workspace builds, package proof, and dependency audit are distinct checks, not tests.

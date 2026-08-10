@@ -17,7 +17,7 @@ ORDIN is the canonical maintainer and repository owner for this reference implem
 - `v0.1.0-reference` is the historical bounded TypeScript authority-core extraction published on 2026-08-08.
 - `v0.2.0-full-stack-reference` is the historical sanitized Hono/SDK/operator-UI successor.
 - `v0.2.1-full-stack-reference` is the historical immutable patch release that preserves v0.2 runtime behavior and records joint author/co-architect credit.
-- `v0.3.0` exists only as an integrated local candidate built forward from v0.2.1. Its executable baseline is `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`.
+- `v0.3.0` exists only as an integrated local candidate built forward from v0.2.1. Its executable baseline is `55d15981cf7f45e441205eb96f5aae79e58d00ae`.
 
 The v0.3 candidate adds typed principal participation, explicit direct/delegated authority, scoped credentials and delegations, receipt/step-up v2, retained zkYA onboarding views, two UIs, strict SDK validation, versioned transcripts, and local Chromium smoke coverage. It does not rewrite historical tags or imply that candidate behavior existed at their release dates.
 

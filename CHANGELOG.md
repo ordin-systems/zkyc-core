@@ -21,17 +21,20 @@ All notable changes to the bounded reference implementation are recorded here. C
 - a real local Chromium smoke test through the built zkYA UI, SDK, and loopback HTTP API;
 - current retained step-up eligibility derived from live subject, delegation, approver, expiry, revocation, and one-time-consumption state;
 - SDK request/response identity and requested-scope correlation;
+- immutable startup policy registries and exact live-policy re-evaluation for evaluation, step-up, and receipt transitions;
+- fail-closed rejection of self-delegation and any reuse of the acting credential in the grantor lane;
+- strict SDK handling for legitimate unbound credential-missing denials and decision-log-correlated step-up creation;
 - clean-build, path-portable, fail-closed scanner/archive/package verification with blank-consumer imports and installed-API probing.
 
-### Verification inventory at executable baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`
+### Verification inventory at executable baseline `55d15981cf7f45e441205eb96f5aae79e58d00ae`
 
-- core tests: 45;
+- core tests: 46;
 - API/server tests: 13;
-- SDK tests: 10;
+- SDK tests: 12;
 - operator UI tests: 3;
 - zkYA component tests: 9;
-- scanner regression tests: 7;
-- release-tooling regression tests: 6;
+- scanner regression tests: 9;
+- release-tooling regression tests: 7;
 - Chromium E2E tests: 1.
 
 Format, security, typecheck, build, package, and dependency-audit gates remain distinct checks and are not included as tests.
