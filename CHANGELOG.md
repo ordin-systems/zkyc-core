@@ -20,7 +20,7 @@ All notable changes to the bounded reference implementation are recorded here. C
 - v0.3 authority bindings in the existing operator UI;
 - a real local Chromium smoke test through the built zkYA UI, SDK, and loopback HTTP API;
 - current retained step-up eligibility derived from live subject, delegation, approver, expiry, revocation, and one-time-consumption state;
-- SDK request/response identity, canonical scope-hash, context-hash, exact-policy-version, policy-outcome, authority-satisfaction and decision-time validity, delegation-binding, receipt-presence/expiry, resolution-intent, and requested-expiry correlation;
+- SDK request/response exact typed-subject/affiliation identity, canonical scope-hash, context-hash, exact-policy-version, policy-outcome, authority-satisfaction and decision-time validity, grantor-scope attenuation, delegation-binding, receipt-presence/expiry, resolution-intent, and requested-expiry correlation;
 - immutable startup policy registries and exact live-policy re-evaluation for evaluation, step-up, and receipt transitions;
 - fail-closed rejection of self-delegation and any reuse of the acting credential in the grantor lane;
 - strict SDK handling for legitimate unbound credential-missing denials and decision-log-correlated step-up creation;
@@ -30,11 +30,12 @@ All notable changes to the bounded reference implementation are recorded here. C
 
 - the defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES` for step-up creation semantics and receipt-template counts;
 - the parallel specification review timed out without a verdict after independently reproducing forged SDK scope, policy-version, and policy-outcome acceptance;
-- executable baseline `7c60695cf6a3812e49a1cd4d1095c524c346f186` remediates all reproduced findings and passes the local integrated verifier;
+- executable baseline `5cb455fa6f176ad76d069a9e51d00e3b957091df` remediates all reproduced findings and passes the local integrated verifier;
 - at superseded candidate `5749f77495bb075871fed0e80eff3ca89e2f9d9f`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` after proving an unsatisfied-capability forged `ALLOW`; this baseline closes that finding and adjacent affiliation/scope/decision-time/receipt/resolution correlations;
+- at superseded candidate `db759f18ff727e59e70f472b193d88cd404e61fe`, both reviewers returned `REQUEST_CHANGES` after independently proving grantor-scope escalation, and the specification reviewer additionally proved direct principal/credential affiliation substitution; this baseline mirrors core exact-subject and delegation-attenuation invariants in SDK issuance and evaluation correlation;
 - no independent `PASS` is claimed for this successor until new exact-head reviews complete.
 
-### Verification inventory at executable baseline `7c60695cf6a3812e49a1cd4d1095c524c346f186`
+### Verification inventory at executable baseline `5cb455fa6f176ad76d069a9e51d00e3b957091df`
 
 - core tests: 46;
 - API/server tests: 13;
