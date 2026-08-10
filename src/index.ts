@@ -40,9 +40,13 @@ export {
   type Policy,
 } from "./policy.js";
 export {
+  AUTHORITY_MODES,
   evaluateAccess,
   type AccessDecision,
   type AccessEvaluationInput,
+  type AuthorityMode,
+  type DelegatedAccessEvaluationInput,
+  type DirectAccessEvaluationInput,
 } from "./evaluation.js";
 export {
   InMemoryAtomicNonceStore,

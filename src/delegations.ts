@@ -271,6 +271,10 @@ export class DelegationAuthority {
     this.#credentialAuthority = record.credentialAuthority;
   }
 
+  usesCredentialAuthority(value: unknown): boolean {
+    return value === this.#credentialAuthority;
+  }
+
   issueDelegation(input: IssueDelegationInput): CapabilityDelegation {
     try {
       const record = requireRecord(input, "delegation issuance input");

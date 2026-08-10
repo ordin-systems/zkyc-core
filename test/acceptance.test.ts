@@ -124,6 +124,7 @@ function evaluate(
   } = {},
 ): AccessDecision {
   return evaluateAccess({
+    authorityMode: "DIRECT",
     principal: input.principal ?? harness.principal,
     credential: input.credential === undefined ? harness.credential : input.credential,
     action: input.action ?? "records:read",
@@ -197,6 +198,7 @@ function createDelegationHarness(input: {
   readonly delegationIssuedAt?: string;
   readonly delegationExpiresAt?: string;
   readonly policy?: Policy;
+  readonly delegate?: Principal;
 } = {}) {
   const credentialAuthority = new CredentialAuthority({ issuerId: "issuer:ordin" });
   const grantor = createPrincipal({
@@ -204,7 +206,7 @@ function createDelegationHarness(input: {
     type: PrincipalType.ORGANIZATION,
     affiliations: [MEMBER_AFFILIATION],
   });
-  const delegate = createPrincipal({
+  const delegate = input.delegate ?? createPrincipal({
     id: "principal:delegate-agent",
     type: PrincipalType.AGENT,
     affiliations: [],
@@ -215,6 +217,15 @@ function createDelegationHarness(input: {
     capabilities: ["records:write", "records:read"],
     allowedActions: ["records:write", "records:read"],
     allowedResourceIds: ["record:2", "record:1"],
+    issuedAt: ISSUED_AT,
+    expiresAt: EXPIRES_AT,
+  });
+  const delegateIdentityCredential = credentialAuthority.issueCredential({
+    id: "credential:delegate-identity",
+    principal: delegate,
+    capabilities: [],
+    allowedActions: [],
+    allowedResourceIds: [],
     issuedAt: ISSUED_AT,
     expiresAt: EXPIRES_AT,
   });
@@ -249,10 +260,42 @@ function createDelegationHarness(input: {
     grantor,
     delegate,
     grantorCredential,
+    delegateIdentityCredential,
     policy,
     delegationAuthority,
     delegation,
   };
+}
+
+function evaluateDelegated(
+  harness: ReturnType<typeof createDelegationHarness>,
+  input: {
+    readonly principal?: Principal;
+    readonly delegateIdentityCredential?: Credential;
+    readonly grantorCredential?: Credential;
+    readonly delegation?: CapabilityDelegation;
+    readonly policy?: Policy;
+    readonly action?: string;
+    readonly resourceId?: string;
+    readonly actionContext?: Readonly<Record<string, unknown>>;
+    readonly at?: string;
+  } = {},
+): AccessDecision {
+  return evaluateAccess({
+    authorityMode: "DELEGATED",
+    principal: input.principal ?? harness.delegate,
+    delegateIdentityCredential:
+      input.delegateIdentityCredential ?? harness.delegateIdentityCredential,
+    grantorCredential: input.grantorCredential ?? harness.grantorCredential,
+    delegation: input.delegation ?? harness.delegation,
+    action: input.action ?? "records:read",
+    resourceId: input.resourceId ?? "record:1",
+    actionContext: input.actionContext ?? { fields: ["name"], purpose: "delegated-review" },
+    policy: input.policy ?? harness.policy,
+    at: input.at ?? DECIDED_AT,
+    credentialAuthority: harness.credentialAuthority,
+    delegationAuthority: harness.delegationAuthority,
+  });
 }
 
 test("1 deterministic ALLOW binds credential affiliations, sensitivity, resource, context and policy", () => {
@@ -267,6 +310,11 @@ test("1 deterministic ALLOW binds credential affiliations, sensitivity, resource
   assert.equal(first.actionSensitivity, ActionSensitivity.ROUTINE);
   assert.equal(first.resourceId, "record:customer-7");
   assert.match(first.contextHash, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(first.version, 2);
+  assert.equal(first.authorityMode, "DIRECT");
+  assert.equal(first.subjectType, harness.principal.type);
+  assert.equal(first.actingCredentialId, harness.credential.id);
+  assert.equal(first.effectiveScopeHash, harness.credential.scopeHash);
   assert.equal(first.credentialId, harness.credential.id);
 });
 
@@ -316,6 +364,7 @@ test("4 missing, malformed, expired and revoked credentials fail closed", () => 
   assert.equal(evaluate(harness, { credential: null }).reasonCode, "CREDENTIAL_MISSING");
   assert.equal(
     evaluateAccess({
+      authorityMode: "DIRECT",
       principal: harness.principal,
       credential: "not-a-credential",
       action: "records:read",
@@ -359,6 +408,30 @@ test("5 explicit DENY, insufficient capability and unknown action return stable 
   assert.equal(evaluate(harness, { action: "records:publish" }).reasonCode, "ACTION_NOT_PERMITTED");
 });
 
+test("5a direct mode enforces exact principal type and credential action/resource scope", () => {
+  const harness = createHarness({
+    credentialAllowedActions: ["records:read"],
+    credentialAllowedResourceIds: ["record:customer-7"],
+  });
+  const wrongType = createPrincipal({
+    id: harness.principal.id,
+    type: PrincipalType.AGENT,
+    affiliations: harness.principal.affiliations,
+  });
+  assert.equal(
+    evaluate(harness, { principal: wrongType }).reasonCode,
+    "CREDENTIAL_SUBJECT_MISMATCH",
+  );
+  assert.equal(
+    evaluate(harness, { action: "records:export" }).reasonCode,
+    "ACTION_OUTSIDE_CREDENTIAL_SCOPE",
+  );
+  assert.equal(
+    evaluate(harness, { resourceId: "dataset:7" }).reasonCode,
+    "RESOURCE_OUTSIDE_CREDENTIAL_SCOPE",
+  );
+});
+
 test("6 malformed and contradictory policy/input is rejected or denied", () => {
   assert.throws(
     () => createPolicy({
@@ -384,6 +457,7 @@ test("6 malformed and contradictory policy/input is rejected or denied", () => {
   );
   const harness = createHarness();
   const invalid = evaluateAccess({
+    authorityMode: "DIRECT",
     principal: harness.principal,
     credential: harness.credential,
     action: "records:read",
@@ -398,6 +472,7 @@ test("6 malformed and contradictory policy/input is rejected or denied", () => {
   assert.equal(invalid.reasonCode, "INVALID_INPUT");
   const stalePolicy = { ...harness.policy, version: `sha256:${"0".repeat(64)}` };
   const stale = evaluateAccess({
+    authorityMode: "DIRECT",
     principal: harness.principal,
     credential: harness.credential,
     action: "records:read",
@@ -898,6 +973,7 @@ test("21 checked-in fixtures execute through the public API", async () => {
     });
     const policy = createPolicy(fixture.policy);
     const decision = evaluateAccess({
+      authorityMode: "DIRECT",
       principal,
       credential,
       action: fixture.action,
@@ -1141,5 +1217,285 @@ test("25 delegation issuance binds authority, root identity, policy, attenuated 
     }),
     (error: unknown) => error instanceof DelegationValidationError &&
       error.code === "DELEGATION_REDELEGATION_NOT_ALLOWED",
+  );
+});
+
+test("26 delegated ALLOW is deterministic and binds distinct acting, grantor and delegation authority", () => {
+  const harness = createDelegationHarness();
+  const first = evaluateDelegated(harness);
+  const second = evaluateDelegated(harness, {
+    actionContext: { purpose: "delegated-review", fields: ["name"] },
+  });
+  assert.deepEqual(first, second);
+  assert.equal(first.version, 2);
+  assert.equal(first.outcome, "ALLOW");
+  assert.equal(first.reasonCode, "POLICY_ALLOW");
+  assert.equal(first.authorityMode, "DELEGATED");
+  assert.equal(first.subjectId, harness.delegate.id);
+  assert.equal(first.subjectType, harness.delegate.type);
+  assert.equal(first.actingCredentialId, harness.delegateIdentityCredential.id);
+  assert.equal(first.effectiveScopeHash, harness.delegation.scopeHash);
+  assert.equal(first.grantorId, harness.grantor.id);
+  assert.equal(first.grantorType, harness.grantor.type);
+  assert.equal(first.grantorCredentialId, harness.grantorCredential.id);
+  assert.equal(first.delegationId, harness.delegation.id);
+  assert.equal(first.delegationBindingHash, harness.delegation.delegationBindingHash);
+  assert.equal("credentialId" in first, false);
+});
+
+test("27 delegated policy affiliations come only from the delegate identity credential", () => {
+  const policy = createPolicy({
+    id: "policy:delegate-affiliation",
+    rules: [{
+      action: "records:read",
+      actionSensitivity: ActionSensitivity.ROUTINE,
+      requiredCapabilities: ["records:read"],
+      requiredAffiliations: [MEMBER_AFFILIATION],
+      effect: "ALLOW",
+    }],
+  });
+  const inherited = createDelegationHarness({ policy });
+  assert.equal(evaluateDelegated(inherited).reasonCode, "AFFILIATION_REQUIRED");
+
+  const affiliatedDelegate = createPrincipal({
+    id: "principal:affiliated-agent",
+    type: PrincipalType.AGENT,
+    affiliations: [MEMBER_AFFILIATION],
+  });
+  const bound = createDelegationHarness({ policy, delegate: affiliatedDelegate });
+  assert.equal(evaluateDelegated(bound).outcome, "ALLOW");
+});
+
+test("28 delegated evaluation rejects delegate identity mismatch, inactivity and substitution", () => {
+  const harness = createDelegationHarness();
+  assert.equal(
+    evaluateDelegated(harness, {
+      delegateIdentityCredential: harness.grantorCredential,
+    }).reasonCode,
+    "DELEGATION_DELEGATE_MISMATCH",
+  );
+  const wrongType = createPrincipal({
+    id: harness.delegate.id,
+    type: PrincipalType.HUMAN,
+    affiliations: [],
+  });
+  assert.equal(
+    evaluateDelegated(harness, { principal: wrongType }).reasonCode,
+    "DELEGATION_DELEGATE_MISMATCH",
+  );
+
+  const expired = harness.credentialAuthority.issueCredential({
+    id: "credential:delegate-expired",
+    principal: harness.delegate,
+    capabilities: [],
+    allowedActions: [],
+    allowedResourceIds: [],
+    issuedAt: ISSUED_AT,
+    expiresAt: "2026-06-01T00:05:00.000Z",
+  });
+  assert.equal(
+    evaluateDelegated(harness, { delegateIdentityCredential: expired }).reasonCode,
+    "CREDENTIAL_EXPIRED",
+  );
+  const future = harness.credentialAuthority.issueCredential({
+    id: "credential:delegate-future",
+    principal: harness.delegate,
+    capabilities: [],
+    allowedActions: [],
+    allowedResourceIds: [],
+    issuedAt: "2026-06-01T00:20:00.000Z",
+    expiresAt: "2026-06-01T00:40:00.000Z",
+  });
+  assert.equal(
+    evaluateDelegated(harness, { delegateIdentityCredential: future }).reasonCode,
+    "CREDENTIAL_NOT_YET_VALID",
+  );
+  harness.credentialAuthority.revokeCredential(harness.delegateIdentityCredential.id, {
+    revokedAt: "2026-06-01T00:09:00.000Z",
+    reason: "delegate-disabled",
+  });
+  assert.equal(evaluateDelegated(harness).reasonCode, "CREDENTIAL_REVOKED");
+});
+
+test("29 delegated evaluation rejects grantor credential substitution and invalidity", () => {
+  const harness = createDelegationHarness();
+  const otherAuthority = new CredentialAuthority({ issuerId: "issuer:cross-authority" });
+  assert.equal(
+    evaluateAccess({
+      authorityMode: "DELEGATED",
+      principal: harness.delegate,
+      delegateIdentityCredential: harness.delegateIdentityCredential,
+      grantorCredential: harness.grantorCredential,
+      delegation: harness.delegation,
+      action: "records:read",
+      resourceId: "record:1",
+      actionContext: { purpose: "cross-authority-substitution" },
+      policy: harness.policy,
+      at: DECIDED_AT,
+      credentialAuthority: otherAuthority,
+      delegationAuthority: harness.delegationAuthority,
+    }).reasonCode,
+    "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+  );
+  const substitute = harness.credentialAuthority.issueCredential({
+    id: "credential:grantor-substitute",
+    principal: harness.grantor,
+    capabilities: harness.grantorCredential.capabilities,
+    allowedActions: harness.grantorCredential.allowedActions,
+    allowedResourceIds: harness.grantorCredential.allowedResourceIds,
+    issuedAt: ISSUED_AT,
+    expiresAt: EXPIRES_AT,
+  });
+  assert.equal(
+    evaluateDelegated(harness, { grantorCredential: substitute }).reasonCode,
+    "DELEGATION_GRANTOR_MISMATCH",
+  );
+  assert.equal(
+    evaluateDelegated(harness, {
+      grantorCredential: {
+        ...harness.grantorCredential,
+        scopeHash: `sha256:${"0".repeat(64)}`,
+      },
+    }).reasonCode,
+    "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+  );
+});
+
+test("30 delegated evaluation fails closed for mixed, unknown, malformed and unregistered inputs", () => {
+  const direct = createHarness();
+  assert.equal(
+    evaluateAccess({
+      authorityMode: "DIRECT",
+      principal: direct.principal,
+      credential: direct.credential,
+      delegation: createDelegationHarness().delegation,
+      action: "records:read",
+      resourceId: "record:customer-7",
+      actionContext: {},
+      policy: direct.policy,
+      at: DECIDED_AT,
+      credentialAuthority: direct.authority,
+    }).reasonCode,
+    "INVALID_INPUT",
+  );
+  assert.equal(
+    evaluateAccess({
+      authorityMode: "CHAINED",
+      principal: direct.principal,
+      credential: direct.credential,
+      action: "records:read",
+      resourceId: "record:customer-7",
+      actionContext: {},
+      policy: direct.policy,
+      at: DECIDED_AT,
+      credentialAuthority: direct.authority,
+    }).reasonCode,
+    "INVALID_INPUT",
+  );
+
+  const harness = createDelegationHarness();
+  const tampered = {
+    ...harness.delegation,
+    allowedResourceIds: ["record:2"],
+  } as CapabilityDelegation;
+  assert.equal(
+    evaluateDelegated(harness, { delegation: tampered }).reasonCode,
+    "DELEGATION_MALFORMED",
+  );
+  const unknownUnsigned = {
+    ...harness.delegation,
+    id: "delegation:unknown",
+    delegationBindingHash: `sha256:${"0".repeat(64)}`,
+  };
+  const unknown = {
+    ...unknownUnsigned,
+    delegationBindingHash: computeDelegationBindingHash(unknownUnsigned),
+  };
+  assert.equal(
+    evaluateDelegated(harness, { delegation: unknown }).reasonCode,
+    "DELEGATION_UNKNOWN",
+  );
+});
+
+test("31 delegated evaluation enforces validity windows and revocation", () => {
+  const future = createDelegationHarness({
+    delegationIssuedAt: "2026-06-01T00:20:00.000Z",
+    delegationExpiresAt: "2026-06-01T00:40:00.000Z",
+  });
+  assert.equal(evaluateDelegated(future).reasonCode, "DELEGATION_NOT_YET_VALID");
+  const expired = createDelegationHarness({
+    delegationExpiresAt: "2026-06-01T00:05:00.000Z",
+  });
+  assert.equal(evaluateDelegated(expired).reasonCode, "DELEGATION_EXPIRED");
+  const revoked = createDelegationHarness();
+  revoked.delegationAuthority.revokeDelegation(revoked.delegation.id, {
+    revokedAt: "2026-06-01T00:09:00.000Z",
+    reason: "grantor-withdrawal",
+  });
+  assert.equal(evaluateDelegated(revoked).reasonCode, "DELEGATION_REVOKED");
+});
+
+test("32 delegated evaluation pins exact policy content", () => {
+  const harness = createDelegationHarness();
+  const changed = createPolicy({
+    id: harness.policy.id,
+    rules: [{
+      action: "records:read",
+      actionSensitivity: ActionSensitivity.SENSITIVE,
+      requiredCapabilities: ["records:read"],
+      requiredAffiliations: [],
+      effect: "ALLOW",
+    }],
+  });
+  assert.equal(
+    evaluateDelegated(harness, { policy: changed }).reasonCode,
+    "DELEGATION_POLICY_MISMATCH",
+  );
+});
+
+test("33 delegated evaluation enforces action, resource and capability attenuation", () => {
+  const scopedPolicy = createPolicy({
+    id: "policy:delegated-scope",
+    rules: [
+      {
+        action: "records:read",
+        actionSensitivity: ActionSensitivity.ROUTINE,
+        requiredCapabilities: ["records:read"],
+        requiredAffiliations: [],
+        effect: "ALLOW",
+      },
+      {
+        action: "records:write",
+        actionSensitivity: ActionSensitivity.SENSITIVE,
+        requiredCapabilities: ["records:write"],
+        requiredAffiliations: [],
+        effect: "ALLOW",
+      },
+    ],
+  });
+  const harness = createDelegationHarness({ policy: scopedPolicy });
+  assert.equal(
+    evaluateDelegated(harness, { action: "records:write" }).reasonCode,
+    "ACTION_OUTSIDE_DELEGATION_SCOPE",
+  );
+  assert.equal(
+    evaluateDelegated(harness, { resourceId: "record:2" }).reasonCode,
+    "RESOURCE_OUTSIDE_DELEGATION_SCOPE",
+  );
+
+  const capabilityPolicy = createPolicy({
+    id: "policy:delegated-capability",
+    rules: [{
+      action: "records:read",
+      actionSensitivity: ActionSensitivity.ROUTINE,
+      requiredCapabilities: ["records:write"],
+      requiredAffiliations: [],
+      effect: "ALLOW",
+    }],
+  });
+  const insufficient = createDelegationHarness({ policy: capabilityPolicy });
+  assert.equal(
+    evaluateDelegated(insufficient).reasonCode,
+    "INSUFFICIENT_DELEGATED_CAPABILITY",
   );
 });
