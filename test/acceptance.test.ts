@@ -140,42 +140,83 @@ function evaluate(
 
 function receiptPayload(
   decision: AccessDecision,
-  input: { nonce?: string; decision?: ReceiptPayload["decision"]; reasonCode?: ReceiptPayload["reasonCode"] } = {},
+  input: {
+    nonce?: string;
+    decision?: ReceiptPayload["decision"];
+    reasonCode?: ReceiptPayload["reasonCode"];
+    issuedAt?: string;
+    expiresAt?: string;
+  } = {},
 ): ReceiptPayload {
-  if (decision.credentialId === undefined) throw new Error("decision must bind a credential");
-  return {
-    version: 1,
+  if (
+    decision.authorityMode === undefined ||
+    decision.subjectType === undefined ||
+    decision.actingCredentialId === undefined ||
+    decision.effectiveScopeHash === undefined
+  ) {
+    throw new Error("decision must bind complete receipt authority");
+  }
+  const outcome = input.decision ?? decision.outcome;
+  const common = {
+    version: 2 as const,
     subjectId: decision.subjectId,
+    subjectType: decision.subjectType,
+    actingCredentialId: decision.actingCredentialId,
+    effectiveScopeHash: decision.effectiveScopeHash,
     action: decision.action,
     actionSensitivity: decision.actionSensitivity,
     resourceId: decision.resourceId,
     contextHash: decision.contextHash,
     policyId: decision.policyId,
     policyVersion: decision.policyVersion,
-    credentialId: decision.credentialId,
-    decision: input.decision ?? decision.outcome,
+    decision: outcome,
     reasonCode: input.reasonCode ?? decision.reasonCode,
+    ...(outcome === "STEP_UP"
+      ? { requiredApproverCapability: decision.requiredApproverCapability as string }
+      : {}),
     nonce: input.nonce ?? "nonce:receipt-1",
     decidedAt: decision.decidedAt,
-    issuedAt: decision.decidedAt,
-    expiresAt: RECEIPT_EXPIRES_AT,
+    issuedAt: input.issuedAt ?? decision.decidedAt,
+    expiresAt: input.expiresAt ?? RECEIPT_EXPIRES_AT,
+  };
+  if (decision.authorityMode === "DIRECT") {
+    return {
+      ...common,
+      authorityMode: "DIRECT",
+      ...(decision.credentialId === undefined ? {} : { credentialId: decision.credentialId }),
+    };
+  }
+  if (
+    decision.grantorId === undefined ||
+    decision.grantorType === undefined ||
+    decision.grantorCredentialId === undefined ||
+    decision.delegationId === undefined ||
+    decision.delegationBindingHash === undefined
+  ) {
+    throw new Error("delegated decision must bind complete delegated authority");
+  }
+  return {
+    ...common,
+    authorityMode: "DELEGATED",
+    grantorId: decision.grantorId,
+    grantorType: decision.grantorType,
+    grantorCredentialId: decision.grantorCredentialId,
+    delegationId: decision.delegationId,
+    delegationBindingHash: decision.delegationBindingHash,
   };
 }
 
-function expectedReceiptBinding(decision: AccessDecision) {
-  if (decision.credentialId === undefined) throw new Error("decision must bind a credential");
-  return {
-    subjectId: decision.subjectId,
-    action: decision.action,
-    actionSensitivity: decision.actionSensitivity,
-    resourceId: decision.resourceId,
-    contextHash: decision.contextHash,
-    policyId: decision.policyId,
-    policyVersion: decision.policyVersion,
-    credentialId: decision.credentialId,
-    decision: decision.outcome,
-    reasonCode: decision.reasonCode,
-  };
+function expectedReceiptBinding(decision: AccessDecision): ReceiptExpectedBinding {
+  const payload = receiptPayload(decision);
+  const {
+    version: _version,
+    nonce: _nonce,
+    decidedAt: _decidedAt,
+    issuedAt: _issuedAt,
+    expiresAt: _expiresAt,
+    ...binding
+  } = payload;
+  return binding;
 }
 
 function createApprover(
@@ -753,7 +794,7 @@ test("11 credential revocation after approval invalidates step-up consumption", 
 test("12 receipt signing and verification detect wrong key, tampering and expiry", () => {
   const harness = createHarness();
   const decision = evaluate(harness);
-  const receipt = signReceipt(receiptPayload(decision), KEY);
+  const receipt = signReceipt(receiptPayload(decision), KEY, harness.authority);
   assert.deepEqual(
     verifyReceipt(receipt, KEY, { at: DECIDED_AT, expected: expectedReceiptBinding(decision) }),
     { valid: true, reasonCode: "RECEIPT_VALID" },
@@ -763,7 +804,10 @@ test("12 receipt signing and verification detect wrong key, tampering and expiry
     verifyReceipt(receipt, KEY, { at: "2026-06-01T00:09:59.000Z" }).reasonCode,
     "RECEIPT_NOT_YET_VALID",
   );
-  assert.throws(() => signReceipt(receiptPayload(decision), Buffer.alloc(31)), DomainValidationError);
+  assert.throws(
+    () => signReceipt(receiptPayload(decision), Buffer.alloc(31), harness.authority),
+    DomainValidationError,
+  );
   const tampered = {
     ...receipt,
     payload: { ...receipt.payload, resourceId: "record:customer-8" },
@@ -778,10 +822,16 @@ test("12 receipt signing and verification detect wrong key, tampering and expiry
 test("13 receipt consumption requires complete bindings and rejects every redirect field", async () => {
   const harness = createHarness();
   const decision = evaluate(harness);
-  const receipt = signReceipt(receiptPayload(decision), KEY);
+  const receipt = signReceipt(receiptPayload(decision), KEY, harness.authority);
   const expected = expectedReceiptBinding(decision);
+  assert.equal(expected.authorityMode, "DIRECT");
+  if (expected.authorityMode !== "DIRECT") return;
   const redirects: readonly ReceiptExpectedBinding[] = [
+    { ...expected, authorityMode: "DELEGATED" } as ReceiptExpectedBinding,
     { ...expected, subjectId: "principal:mallory" },
+    { ...expected, subjectType: PrincipalType.AGENT },
+    { ...expected, actingCredentialId: "credential:other", credentialId: "credential:other" },
+    { ...expected, effectiveScopeHash: `sha256:${"2".repeat(64)}` },
     { ...expected, action: "records:write" },
     { ...expected, actionSensitivity: ActionSensitivity.CRITICAL },
     { ...expected, resourceId: "record:customer-8" },
@@ -789,8 +839,8 @@ test("13 receipt consumption requires complete bindings and rejects every redire
     { ...expected, policyId: "policy:other" },
     { ...expected, policyVersion: `sha256:${"1".repeat(64)}` },
     { ...expected, credentialId: "credential:other" },
-    { ...expected, decision: "DENY" },
-    { ...expected, reasonCode: "POLICY_DENY" },
+    { ...expected, decision: "DENY", reasonCode: "POLICY_DENY" },
+    { ...expected, decision: "DENY", reasonCode: "ACTION_NOT_PERMITTED" },
   ];
   const store = new InMemoryAtomicNonceStore();
   for (const redirected of redirects) {
@@ -837,15 +887,27 @@ test("14 contradictory receipt decision/reason combinations are rejected", () =>
   const harness = createHarness();
   const decision = evaluate(harness);
   assert.throws(
-    () => signReceipt(receiptPayload(decision, { decision: "ALLOW", reasonCode: "POLICY_DENY" }), KEY),
+    () => signReceipt(
+      receiptPayload(decision, { decision: "ALLOW", reasonCode: "POLICY_DENY" }),
+      KEY,
+      harness.authority,
+    ),
     DomainValidationError,
   );
   assert.throws(
-    () => signReceipt(receiptPayload(decision, { decision: "STEP_UP", reasonCode: "POLICY_ALLOW" }), KEY),
+    () => signReceipt(
+      receiptPayload(decision, { decision: "STEP_UP", reasonCode: "POLICY_ALLOW" }),
+      KEY,
+      harness.authority,
+    ),
     DomainValidationError,
   );
   assert.throws(
-    () => signReceipt(receiptPayload(decision, { decision: "DENY", reasonCode: "POLICY_ALLOW" }), KEY),
+    () => signReceipt(
+      receiptPayload(decision, { decision: "DENY", reasonCode: "POLICY_ALLOW" }),
+      KEY,
+      harness.authority,
+    ),
     DomainValidationError,
   );
 });
@@ -853,7 +915,7 @@ test("14 contradictory receipt decision/reason combinations are rejected", () =>
 test("15 non-authorizing DENY and STEP_UP receipts are never consumed", async () => {
   const harness = createHarness();
   const deny = evaluate(harness, { action: "records:delete" });
-  const denyReceipt = signReceipt(receiptPayload(deny), KEY);
+  const denyReceipt = signReceipt(receiptPayload(deny), KEY, harness.authority);
   const store = new InMemoryAtomicNonceStore();
   assert.deepEqual(
     await verifyAndConsumeReceipt(denyReceipt, KEY, store, harness.authority, {
@@ -863,7 +925,11 @@ test("15 non-authorizing DENY and STEP_UP receipts are never consumed", async ()
     { valid: false, reasonCode: "RECEIPT_NOT_AUTHORIZING" },
   );
   const stepUp = evaluate(harness, { action: "records:export" });
-  const stepUpReceipt = signReceipt(receiptPayload(stepUp, { nonce: "nonce:step-up" }), KEY);
+  const stepUpReceipt = signReceipt(
+    receiptPayload(stepUp, { nonce: "nonce:step-up" }),
+    KEY,
+    harness.authority,
+  );
   assert.deepEqual(
     await verifyAndConsumeReceipt(stepUpReceipt, KEY, store, harness.authority, {
       at: DECIDED_AT,
@@ -876,7 +942,7 @@ test("15 non-authorizing DENY and STEP_UP receipts are never consumed", async ()
 test("16 credential revocation after receipt signing invalidates consumption", async () => {
   const harness = createHarness();
   const decision = evaluate(harness);
-  const receipt = signReceipt(receiptPayload(decision), KEY);
+  const receipt = signReceipt(receiptPayload(decision), KEY, harness.authority);
   harness.authority.revokeCredential(harness.credential.id, {
     revokedAt: "2026-06-01T00:11:00.000Z",
     reason: "post-signing-revocation",
@@ -896,7 +962,7 @@ test("16 credential revocation after receipt signing invalidates consumption", a
 test("17 receipt replay is rejected sequentially", async () => {
   const harness = createHarness();
   const decision = evaluate(harness);
-  const receipt = signReceipt(receiptPayload(decision), KEY);
+  const receipt = signReceipt(receiptPayload(decision), KEY, harness.authority);
   const store = new InMemoryAtomicNonceStore();
   const options = { at: DECIDED_AT, expected: expectedReceiptBinding(decision) };
   assert.equal((await verifyAndConsumeReceipt(receipt, KEY, store, harness.authority, options)).valid, true);
@@ -907,6 +973,7 @@ test("17 receipt replay is rejected sequentially", async () => {
   const maximumLengthNonceReceipt = signReceipt(
     receiptPayload(decision, { nonce: "n".repeat(128) }),
     KEY,
+    harness.authority,
   );
   assert.equal(
     (await verifyAndConsumeReceipt(
@@ -923,7 +990,7 @@ test("17 receipt replay is rejected sequentially", async () => {
 test("18 concurrent replay attempts yield exactly one authorization", async () => {
   const harness = createHarness();
   const decision = evaluate(harness);
-  const receipt = signReceipt(receiptPayload(decision), KEY);
+  const receipt = signReceipt(receiptPayload(decision), KEY, harness.authority);
   const store = new InMemoryAtomicNonceStore();
   const attempts = await Promise.all(
     Array.from({ length: 32 }, () =>
@@ -935,6 +1002,328 @@ test("18 concurrent replay attempts yield exactly one authorization", async () =
   );
   assert.equal(attempts.filter((attempt) => attempt.valid).length, 1);
   assert.equal(attempts.filter((attempt) => attempt.reasonCode === "RECEIPT_REPLAYED").length, 31);
+});
+
+test("18a delegated ALLOW receipts sign, inspect and consume without delegated scope on acting identity", async () => {
+  const harness = createDelegationHarness();
+  const decision = evaluateDelegated(harness);
+  assert.equal(decision.outcome, "ALLOW");
+  assert.deepEqual(harness.delegateIdentityCredential.allowedActions, []);
+  assert.deepEqual(harness.delegateIdentityCredential.allowedResourceIds, []);
+  const receipt = signReceipt(
+    receiptPayload(decision, { nonce: "nonce:delegated-receipt" }),
+    KEY,
+    harness.credentialAuthority,
+    harness.delegationAuthority,
+  );
+  const expected = expectedReceiptBinding(decision);
+  assert.deepEqual(
+    verifyReceipt(receipt, KEY, {
+      at: DECIDED_AT,
+      expected: {
+        authorityMode: "DELEGATED",
+        subjectType: PrincipalType.AGENT,
+        actingCredentialId: harness.delegateIdentityCredential.id,
+        effectiveScopeHash: harness.delegation.scopeHash,
+        grantorCredentialId: harness.grantorCredential.id,
+        delegationId: harness.delegation.id,
+        delegationBindingHash: harness.delegation.delegationBindingHash,
+      },
+    }),
+    { valid: true, reasonCode: "RECEIPT_VALID" },
+  );
+  assert.deepEqual(
+    await verifyAndConsumeReceipt(
+      receipt,
+      KEY,
+      new InMemoryAtomicNonceStore(),
+      harness.credentialAuthority,
+      { at: DECIDED_AT, expected, delegationAuthority: harness.delegationAuthority },
+    ),
+    { valid: true, reasonCode: "RECEIPT_VALID" },
+  );
+});
+
+test("18b delegated receipt consumption rejects redirects for every authority binding", async () => {
+  const harness = createDelegationHarness();
+  const decision = evaluateDelegated(harness);
+  const receipt = signReceipt(
+    receiptPayload(decision, { nonce: "nonce:delegated-redirect" }),
+    KEY,
+    harness.credentialAuthority,
+    harness.delegationAuthority,
+  );
+  const expected = expectedReceiptBinding(decision);
+  assert.equal(expected.authorityMode, "DELEGATED");
+  if (expected.authorityMode !== "DELEGATED") return;
+  const redirects: readonly ReceiptExpectedBinding[] = [
+    { ...expected, authorityMode: "DIRECT" } as ReceiptExpectedBinding,
+    { ...expected, subjectId: "principal:other-delegate" },
+    { ...expected, subjectType: PrincipalType.HUMAN },
+    { ...expected, actingCredentialId: "credential:other-acting" },
+    { ...expected, effectiveScopeHash: `sha256:${"1".repeat(64)}` },
+    { ...expected, action: "records:write" },
+    { ...expected, actionSensitivity: ActionSensitivity.SENSITIVE },
+    { ...expected, resourceId: "record:2" },
+    { ...expected, contextHash: `sha256:${"2".repeat(64)}` },
+    { ...expected, policyId: "policy:other" },
+    { ...expected, policyVersion: `sha256:${"3".repeat(64)}` },
+    { ...expected, grantorId: "principal:other-grantor" },
+    { ...expected, grantorType: PrincipalType.HUMAN },
+    { ...expected, grantorCredentialId: "credential:other-grantor" },
+    { ...expected, delegationId: "delegation:other" },
+    { ...expected, delegationBindingHash: `sha256:${"4".repeat(64)}` },
+    { ...expected, decision: "DENY", reasonCode: "POLICY_DENY" },
+    { ...expected, decision: "DENY", reasonCode: "ACTION_NOT_PERMITTED" },
+  ];
+  const store = new InMemoryAtomicNonceStore();
+  for (const redirected of redirects) {
+    assert.deepEqual(
+      await verifyAndConsumeReceipt(receipt, KEY, store, harness.credentialAuthority, {
+        at: DECIDED_AT,
+        expected: redirected,
+        delegationAuthority: harness.delegationAuthority,
+      }),
+      { valid: false, reasonCode: "RECEIPT_BINDING_MISMATCH" },
+    );
+  }
+  assert.deepEqual(
+    await verifyAndConsumeReceipt(receipt, KEY, store, harness.credentialAuthority, {
+      at: DECIDED_AT,
+      expected,
+    }),
+    { valid: false, reasonCode: "RECEIPT_AUTHORITY_INVALID" },
+  );
+});
+
+test("18c delegated receipts revalidate acting, grantor and delegation revocation after signing", async () => {
+  const cases = ["acting", "grantor", "delegation"] as const;
+  for (const authority of cases) {
+    const harness = createDelegationHarness();
+    const decision = evaluateDelegated(harness);
+    const receipt = signReceipt(
+      receiptPayload(decision, { nonce: `nonce:revoked-${authority}` }),
+      KEY,
+      harness.credentialAuthority,
+      harness.delegationAuthority,
+    );
+    if (authority === "acting") {
+      harness.credentialAuthority.revokeCredential(harness.delegateIdentityCredential.id, {
+        revokedAt: APPROVED_AT,
+        reason: "acting-revoked-after-signing",
+      });
+    } else if (authority === "grantor") {
+      harness.credentialAuthority.revokeCredential(harness.grantorCredential.id, {
+        revokedAt: APPROVED_AT,
+        reason: "grantor-revoked-after-signing",
+      });
+    } else {
+      harness.delegationAuthority.revokeDelegation(harness.delegation.id, {
+        revokedAt: APPROVED_AT,
+        reason: "delegation-revoked-after-signing",
+      });
+    }
+    assert.deepEqual(
+      await verifyAndConsumeReceipt(
+        receipt,
+        KEY,
+        new InMemoryAtomicNonceStore(),
+        harness.credentialAuthority,
+        {
+          at: "2026-06-01T00:12:00.000Z",
+          expected: expectedReceiptBinding(decision),
+          delegationAuthority: harness.delegationAuthority,
+        },
+      ),
+      { valid: false, reasonCode: "RECEIPT_AUTHORITY_INVALID" },
+    );
+  }
+});
+
+test("18d receipt signing caps authority expiry and rejects cross-authority configuration", async () => {
+  const direct = createHarness({ credentialExpiresAt: "2026-06-01T00:15:00.000Z" });
+  const directDecision = evaluate(direct);
+  assert.throws(
+    () => signReceipt(receiptPayload(directDecision), KEY, direct.authority),
+    DomainValidationError,
+  );
+  const wrongCredentialAuthority = new CredentialAuthority({ issuerId: "issuer:other" });
+  assert.throws(
+    () => signReceipt(receiptPayload(directDecision, { expiresAt: "2026-06-01T00:14:00.000Z" }), KEY, wrongCredentialAuthority),
+    DomainValidationError,
+  );
+
+  const delegated = createDelegationHarness({
+    delegationExpiresAt: "2026-06-01T00:15:00.000Z",
+  });
+  const delegatedDecision = evaluateDelegated(delegated);
+  assert.throws(
+    () => signReceipt(
+      receiptPayload(delegatedDecision),
+      KEY,
+      delegated.credentialAuthority,
+      delegated.delegationAuthority,
+    ),
+    DomainValidationError,
+  );
+  const crossDelegationAuthority = new DelegationAuthority({
+    issuerId: "delegation-issuer:cross",
+    credentialAuthority: wrongCredentialAuthority,
+  });
+  assert.throws(
+    () => signReceipt(
+      receiptPayload(delegatedDecision, { expiresAt: "2026-06-01T00:14:00.000Z" }),
+      KEY,
+      delegated.credentialAuthority,
+      crossDelegationAuthority,
+    ),
+    DomainValidationError,
+  );
+  const validReceipt = signReceipt(
+    receiptPayload(delegatedDecision, {
+      nonce: "nonce:cross-authority-consume",
+      expiresAt: "2026-06-01T00:14:00.000Z",
+    }),
+    KEY,
+    delegated.credentialAuthority,
+    delegated.delegationAuthority,
+  );
+  assert.deepEqual(
+    await verifyAndConsumeReceipt(
+      validReceipt,
+      KEY,
+      new InMemoryAtomicNonceStore(),
+      delegated.credentialAuthority,
+      {
+        at: DECIDED_AT,
+        expected: expectedReceiptBinding(delegatedDecision),
+        delegationAuthority: crossDelegationAuthority,
+      },
+    ),
+    { valid: false, reasonCode: "RECEIPT_AUTHORITY_INVALID" },
+  );
+});
+
+test("18e receipt v2 is strict and policy/scope tampering invalidates its domain-separated signature", () => {
+  const harness = createDelegationHarness();
+  const decision = evaluateDelegated(harness);
+  const payload = receiptPayload(decision);
+  const receipt = signReceipt(
+    payload,
+    KEY,
+    harness.credentialAuthority,
+    harness.delegationAuthority,
+  );
+  for (const patch of [
+    { policyVersion: `sha256:${"5".repeat(64)}` },
+    { effectiveScopeHash: `sha256:${"6".repeat(64)}` },
+    { delegationBindingHash: `sha256:${"7".repeat(64)}` },
+  ]) {
+    assert.equal(
+      verifyReceipt({ ...receipt, payload: { ...receipt.payload, ...patch } }, KEY, {
+        at: DECIDED_AT,
+      }).reasonCode,
+      "RECEIPT_SIGNATURE_INVALID",
+    );
+  }
+  assert.throws(
+    () => signReceipt(
+      { ...payload, unexpected: true } as unknown as ReceiptPayload,
+      KEY,
+      harness.credentialAuthority,
+      harness.delegationAuthority,
+    ),
+    DomainValidationError,
+  );
+  const directHarness = createHarness();
+  const directDecision = evaluate(directHarness);
+  const allowWithApprover = {
+    ...receiptPayload(directDecision),
+    requiredApproverCapability: "approval:records-read",
+  } as ReceiptPayload;
+  assert.throws(
+    () => signReceipt(allowWithApprover, KEY, directHarness.authority),
+    DomainValidationError,
+  );
+  const stepUpDecision = evaluate(directHarness, { action: "records:export" });
+  const { requiredApproverCapability: _required, ...stepUpWithoutApprover } = receiptPayload(stepUpDecision);
+  assert.throws(
+    () => signReceipt(stepUpWithoutApprover as ReceiptPayload, KEY, directHarness.authority),
+    DomainValidationError,
+  );
+  assert.deepEqual(
+    verifyReceipt(receipt, KEY, {
+      at: DECIDED_AT,
+      expected: { subjectId: undefined } as never,
+    }),
+    { valid: false, reasonCode: "RECEIPT_BINDING_MISMATCH" },
+  );
+  const scopedHarness = createHarness({
+    credentialAllowedActions: ["records:read"],
+    credentialAllowedResourceIds: ["record:customer-7"],
+  });
+  const outsideScope = evaluate(scopedHarness, { action: "records:publish" });
+  assert.equal(outsideScope.reasonCode, "ACTION_OUTSIDE_CREDENTIAL_SCOPE");
+  assert.throws(
+    () => signReceipt(receiptPayload(outsideScope), KEY, scopedHarness.authority),
+    DomainValidationError,
+  );
+});
+
+test("18f 32 concurrent delegated receipt replays yield exactly one authorization", async () => {
+  const harness = createDelegationHarness();
+  const decision = evaluateDelegated(harness);
+  const receipt = signReceipt(
+    receiptPayload(decision, { nonce: "nonce:delegated-concurrent" }),
+    KEY,
+    harness.credentialAuthority,
+    harness.delegationAuthority,
+  );
+  const store = new InMemoryAtomicNonceStore();
+  const attempts = await Promise.all(
+    Array.from({ length: 32 }, () =>
+      verifyAndConsumeReceipt(receipt, KEY, store, harness.credentialAuthority, {
+        at: DECIDED_AT,
+        expected: expectedReceiptBinding(decision),
+        delegationAuthority: harness.delegationAuthority,
+      }),
+    ),
+  );
+  assert.equal(attempts.filter((attempt) => attempt.valid).length, 1);
+  assert.equal(attempts.filter((attempt) => attempt.reasonCode === "RECEIPT_REPLAYED").length, 31);
+});
+
+test("18g receipt anti-replay storage is domain-separated and fails closed on storage errors", async () => {
+  const harness = createHarness();
+  const decision = evaluate(harness);
+  const receipt = signReceipt(
+    receiptPayload(decision, { nonce: "nonce:anti-replay-storage" }),
+    KEY,
+    harness.authority,
+  );
+  const options = { at: DECIDED_AT, expected: expectedReceiptBinding(decision) };
+  const throwingStore = {
+    async consume(): Promise<boolean> {
+      throw new Error("storage unavailable");
+    },
+  };
+  assert.deepEqual(
+    await verifyAndConsumeReceipt(receipt, KEY, throwingStore, harness.authority, options),
+    { valid: false, reasonCode: "RECEIPT_REPLAYED" },
+  );
+  let observedNonce = "";
+  const recordingStore = {
+    async consume(nonce: string): Promise<boolean> {
+      observedNonce = nonce;
+      return true;
+    },
+  };
+  assert.deepEqual(
+    await verifyAndConsumeReceipt(receipt, KEY, recordingStore, harness.authority, options),
+    { valid: true, reasonCode: "RECEIPT_VALID" },
+  );
+  assert.match(observedNonce, /^receipt-v2:[0-9a-f]{64}$/);
+  assert.equal(observedNonce.startsWith("step-up-authorization:"), false);
 });
 
 test("19 zkPassProofId remains unverified metadata and does not affect authority", () => {
