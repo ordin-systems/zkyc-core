@@ -2,7 +2,7 @@
 
 **Stage:** integrated local reference candidate; unreleased.
 
-**Executable baseline:** `4a9bf5c17bf6ef4a2d35ce15b977308ef37f88ae`.
+**Executable baseline:** `7c60695cf6a3812e49a1cd4d1095c524c346f186`.
 
 These notes describe candidate behavior. They are not evidence of a merge, tag, GitHub release, publication, immutable setting, CI result for this head, independent approval, archive digest, logged-out readback, or npm package.
 
@@ -18,7 +18,7 @@ These notes describe candidate behavior. They are not evidence of a merge, tag, 
 - immutable startup policy allowlists with exact live-policy re-evaluation at every authorizing transition;
 - human-only step-up with exact approver capability, `step-up:resolve` action, and resource scope;
 - authority-bound step-up v2 and HMAC-SHA256 receipt v2 with one-time consumption;
-- strict SDK runtime validation of exact route schemas and recomputed request/response scope, context, policy, authority satisfaction, outcome, delegation binding, receipt presence, resolution intent, decision log, expiry, and initial-status correlation;
+- strict SDK runtime validation of exact route schemas and recomputed request/response scope, context, policy, authority satisfaction and decision-time validity, outcome, delegation binding, receipt presence/expiry, resolution intent, decision log, and initial-status correlation;
 - retained zkYA onboarding views showing current authority, eligibility, approval, and receipt state;
 - existing operator cockpit plus dedicated zkYA React/Vite onboarding UI;
 - executable versioned lifecycle transcripts through API and SDK;
@@ -40,7 +40,7 @@ Typecheck, build, format, security, package, and dependency-audit gates are sepa
 
 ## Independent review state
 
-The defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES`. Its two findings were remediated. The parallel specification review timed out without a verdict after reproducing additional forged SDK derived-hash and policy-semantic acceptance; those paths were also remediated. At superseded candidate `5749f77495bb075871fed0e80eff3ca89e2f9d9f`, the defensive reviewer returned `PASS`, while the specification reviewer returned `REQUEST_CHANGES` after proving an unsatisfied-capability forged `ALLOW`. The executable baseline above closes that finding and adjacent affiliation/scope/receipt/resolution correlations. This successor has not yet received new exact-head independent `PASS` verdicts.
+The defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES`. Its two findings were remediated. The parallel specification review timed out without a verdict after reproducing additional forged SDK derived-hash and policy-semantic acceptance; those paths were also remediated. At superseded candidate `5749f77495bb075871fed0e80eff3ca89e2f9d9f`, the defensive reviewer returned `PASS`, while the specification reviewer returned `REQUEST_CHANGES` after proving an unsatisfied-capability forged `ALLOW`. The executable baseline above closes that finding and adjacent affiliation/scope/decision-time/receipt/resolution correlations. This successor has not yet received new exact-head independent `PASS` verdicts.
 
 ## Compatibility and state
 
