@@ -597,20 +597,66 @@ function sameUnverifiedMetadata(
   return sameCanonicalStrings(responseProofs, requestProofs);
 }
 
+function containsAll(values: readonly string[], required: readonly string[]): boolean {
+  const available = new Set(values);
+  return required.every((value) => available.has(value));
+}
+
+function containsAllAffiliations(
+  values: readonly Affiliation[],
+  required: readonly Affiliation[],
+): boolean {
+  const available = new Set(values.map(({ organizationId, role }) => `${organizationId}\u0000${role}`));
+  return required.every(({ organizationId, role }) => available.has(`${organizationId}\u0000${role}`));
+}
+
+function suppliedAuthoritySatisfiesRule(
+  input: EvaluateRequest,
+  rule: PolicyRule,
+): boolean {
+  if (input.authorityMode === "DIRECT") {
+    const credential = input.credential;
+    return credential !== null &&
+      credential.principalId === input.principal.id &&
+      credential.principalType === input.principal.type &&
+      credential.allowedActions.includes(input.action) &&
+      credential.allowedResourceIds.includes(input.resourceId) &&
+      containsAll(credential.capabilities, rule.requiredCapabilities) &&
+      containsAllAffiliations(credential.affiliations, rule.requiredAffiliations);
+  }
+  return input.delegateIdentityCredential.principalId === input.principal.id &&
+    input.delegateIdentityCredential.principalType === input.principal.type &&
+    input.delegation.delegateId === input.principal.id &&
+    input.delegation.delegateType === input.principal.type &&
+    input.delegation.grantorCredentialId === input.grantorCredential.id &&
+    input.delegation.grantorId === input.grantorCredential.principalId &&
+    input.delegation.grantorType === input.grantorCredential.principalType &&
+    input.delegation.allowedActions.includes(input.action) &&
+    input.delegation.allowedResourceIds.includes(input.resourceId) &&
+    containsAll(input.delegation.capabilities, rule.requiredCapabilities) &&
+    containsAllAffiliations(
+      input.delegateIdentityCredential.affiliations,
+      rule.requiredAffiliations,
+    );
+}
+
 function decisionMatchesRequestedPolicy(
   decision: AccessDecision,
   policy: CanonicalPolicy,
+  input: EvaluateRequest,
 ): boolean {
   const rule = policy.rules.find((candidate) => candidate.action === decision.action);
   if (decision.actionSensitivity !== (rule?.actionSensitivity ?? "ROUTINE")) return false;
   if (decision.outcome === "ALLOW") {
     return decision.reasonCode === "POLICY_ALLOW" &&
       rule?.effect === "ALLOW" &&
+      suppliedAuthoritySatisfiesRule(input, rule) &&
       decision.requiredApproverCapability === undefined;
   }
   if (decision.outcome === "STEP_UP") {
     return decision.reasonCode === "HUMAN_APPROVAL_REQUIRED" &&
       rule?.effect === "STEP_UP" &&
+      suppliedAuthoritySatisfiesRule(input, rule) &&
       decision.requiredApproverCapability === rule.approverCapability;
   }
   if (decision.reasonCode === "POLICY_DENY") return rule?.effect === "DENY";
@@ -740,6 +786,7 @@ export class ZkycReferenceClient {
       const expectedBindingHash = await computeDelegationBindingHash(delegation);
       requireResponseCorrelation(
         delegation.grantorCredentialId === input.grantorCredential.id &&
+        delegation.issuerId === input.grantorCredential.issuerId &&
         delegation.grantorId === input.grantor.id &&
         delegation.grantorType === input.grantor.type &&
         delegation.delegateId === input.delegate.id &&
@@ -781,7 +828,8 @@ export class ZkycReferenceClient {
         decision.contextHash === expectedContextHash &&
         decision.policyId === input.policy.id &&
         decision.policyVersion === expectedPolicy.version &&
-        decisionMatchesRequestedPolicy(decision, expectedPolicy),
+        decisionMatchesRequestedPolicy(decision, expectedPolicy, input) &&
+        (response.receipt !== undefined) === (input.issueReceipt && decision.outcome === "ALLOW"),
       );
       if (input.authorityMode === "DIRECT") {
         if (input.credential === null) {
@@ -795,19 +843,33 @@ export class ZkycReferenceClient {
             response.receipt === undefined,
           );
         } else {
+          const expectedScopeHash = await computeScopeHash(input.credential);
           requireResponseCorrelation(
             decision.authorityMode === "DIRECT" &&
             decision.reasonCode !== "CREDENTIAL_MISSING" &&
             decision.actingCredentialId === input.credential.id &&
-            decision.effectiveScopeHash === input.credential.scopeHash,
+            input.credential.scopeHash === expectedScopeHash &&
+            decision.effectiveScopeHash === expectedScopeHash,
           );
         }
       } else {
+        const expectedDelegationScopeHash = await computeScopeHash(input.delegation);
+        const expectedDelegateCredentialScopeHash = await computeScopeHash(input.delegateIdentityCredential);
+        const expectedGrantorCredentialScopeHash = await computeScopeHash(input.grantorCredential);
+        const expectedDelegationBindingHash = await computeDelegationBindingHash(input.delegation);
         requireResponseCorrelation(
           decision.authorityMode === "DELEGATED" &&
           decision.reasonCode !== "CREDENTIAL_MISSING" &&
+          input.delegateIdentityCredential.scopeHash === expectedDelegateCredentialScopeHash &&
+          input.grantorCredential.scopeHash === expectedGrantorCredentialScopeHash &&
+          input.delegation.scopeHash === expectedDelegationScopeHash &&
+          input.delegation.delegationBindingHash === expectedDelegationBindingHash &&
+          input.delegation.issuerId === input.grantorCredential.issuerId &&
+          input.delegateIdentityCredential.issuerId === input.grantorCredential.issuerId &&
+          input.delegation.policyId === expectedPolicy.id &&
+          input.delegation.policyVersion === expectedPolicy.version &&
           decision.actingCredentialId === input.delegateIdentityCredential.id &&
-          decision.effectiveScopeHash === input.delegation.scopeHash &&
+          decision.effectiveScopeHash === expectedDelegationScopeHash &&
           decision.grantorId === input.delegation.grantorId &&
           decision.grantorType === input.delegation.grantorType &&
           decision.grantorCredentialId === input.delegation.grantorCredentialId &&
@@ -838,11 +900,14 @@ export class ZkycReferenceClient {
         const response = validateResolutionResponse(value);
         if (response.ok) {
           requireResponseCorrelation(
+            input.resolution === "APPROVE" &&
             response.authorization.requestId === requestId &&
             response.authorization.approvedBy === input.approver.id &&
             response.authorization.approvedByType === input.approver.type &&
             response.authorization.approverCredentialId === input.approverCredential.id,
           );
+        } else if (input.resolution === "REJECT") {
+          requireResponseCorrelation(response.reasonCode === "STEP_UP_REJECTED");
         }
         return response;
       },

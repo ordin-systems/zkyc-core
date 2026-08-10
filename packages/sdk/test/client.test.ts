@@ -608,6 +608,59 @@ test("SDK rejects valid responses bound to a different requested authority recor
     }));
   }
 
+  for (const unsatisfiedPolicyInput of [
+    {
+      id: "policy:requires-admin",
+      rules: [{
+        action: staticDecision.action,
+        actionSensitivity: "ROUTINE" as const,
+        requiredCapabilities: ["admin"],
+        requiredAffiliations: [],
+        effect: "ALLOW" as const,
+      }],
+    },
+    {
+      id: "policy:requires-affiliation",
+      rules: [{
+        action: staticDecision.action,
+        actionSensitivity: "ROUTINE" as const,
+        requiredCapabilities: ["records:read"],
+        requiredAffiliations: [{ organizationId: "organization:required", role: "member" }],
+        effect: "ALLOW" as const,
+      }],
+    },
+  ]) {
+    const unsatisfiedPolicy = createPolicy(unsatisfiedPolicyInput);
+    const client = new ZkycReferenceClient({
+      baseUrl: "https://invalid.reference",
+      fetch: () => Promise.resolve(jsonResponse({
+        logId: "decision-log:forged-policy-satisfaction",
+        decision: {
+          ...staticDecision,
+          policyId: unsatisfiedPolicy.id,
+          policyVersion: unsatisfiedPolicy.version,
+        },
+      })),
+    });
+    await expectInvalidResponse(() => client.evaluate({
+      ...evaluationInput,
+      policy: unsatisfiedPolicyInput,
+    }));
+  }
+
+  const missingRequestedReceiptClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      logId: "decision-log:missing-requested-receipt",
+      decision: staticDecision,
+    })),
+  });
+  await expectInvalidResponse(() => missingRequestedReceiptClient.evaluate({
+    ...evaluationInput,
+    issueReceipt: true,
+    receiptExpiresAt: ARTIFACT_EXPIRY,
+  }));
+
   const delegate: Principal = { id: staticDelegation.delegateId, type: "AGENT", affiliations: [] };
   const delegationClient = new ZkycReferenceClient({
     baseUrl: "https://invalid.reference",
@@ -691,6 +744,16 @@ test("SDK rejects valid responses bound to a different requested authority recor
   });
   await expectInvalidResponse(() => resolutionClient.resolveStepUpRequest(staticAuthorization.requestId, {
     resolution: "APPROVE",
+    approver: human,
+    approverCredential: staticCredential,
+  }));
+
+  const rejectAcceptedClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({ ok: true, authorization: staticAuthorization })),
+  });
+  await expectInvalidResponse(() => rejectAcceptedClient.resolveStepUpRequest(staticAuthorization.requestId, {
+    resolution: "REJECT",
     approver: human,
     approverCredential: staticCredential,
   }));
