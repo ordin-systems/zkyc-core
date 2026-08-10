@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node --test dist/test/*.test.js",
+    "test": "npm --prefix ../.. run build && npm run build -w @ordin/zkyc-core-api-reference && tsc && node --test dist/test/*.test.js",
     "build": "tsc"
   },
   "devDependencies": {

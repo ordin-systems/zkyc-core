@@ -3,8 +3,10 @@ import {
   validateAuthorizationConsumeResponse,
   validateCredentialResponse,
   validateDecisionLogResponse,
+  validateDelegationResponse,
   validateEvaluationResponse,
   validateHealthResponse,
+  validateOnboardingView,
   validateReceiptConsumeResponse,
   validateResolutionResponse,
   validateRevocationResponse,
@@ -13,8 +15,39 @@ import {
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
 
+export type PrincipalType = "HUMAN" | "ORGANIZATION" | "AGENT";
+export type AuthorityMode = "DIRECT" | "DELEGATED";
 export type ActionSensitivity = "ROUTINE" | "SENSITIVE" | "CRITICAL";
 export type DecisionOutcome = "ALLOW" | "DENY" | "STEP_UP";
+export type ReasonCode =
+  | "POLICY_ALLOW"
+  | "POLICY_DENY"
+  | "HUMAN_APPROVAL_REQUIRED"
+  | "INVALID_INPUT"
+  | "CREDENTIAL_MISSING"
+  | "CREDENTIAL_MALFORMED"
+  | "CREDENTIAL_UNKNOWN"
+  | "CREDENTIAL_NOT_YET_VALID"
+  | "CREDENTIAL_EXPIRED"
+  | "CREDENTIAL_REVOKED"
+  | "CREDENTIAL_SUBJECT_MISMATCH"
+  | "ACTION_OUTSIDE_CREDENTIAL_SCOPE"
+  | "RESOURCE_OUTSIDE_CREDENTIAL_SCOPE"
+  | "DELEGATION_MALFORMED"
+  | "DELEGATION_UNKNOWN"
+  | "DELEGATION_NOT_YET_VALID"
+  | "DELEGATION_EXPIRED"
+  | "DELEGATION_REVOKED"
+  | "DELEGATION_POLICY_MISMATCH"
+  | "DELEGATION_GRANTOR_CREDENTIAL_INVALID"
+  | "DELEGATION_GRANTOR_MISMATCH"
+  | "DELEGATION_DELEGATE_MISMATCH"
+  | "ACTION_OUTSIDE_DELEGATION_SCOPE"
+  | "RESOURCE_OUTSIDE_DELEGATION_SCOPE"
+  | "INSUFFICIENT_DELEGATED_CAPABILITY"
+  | "INSUFFICIENT_CAPABILITY"
+  | "AFFILIATION_REQUIRED"
+  | "ACTION_NOT_PERMITTED";
 
 export interface Affiliation {
   readonly organizationId: string;
@@ -23,19 +56,49 @@ export interface Affiliation {
 
 export interface Principal {
   readonly id: string;
+  readonly type: PrincipalType;
   readonly affiliations: readonly Affiliation[];
 }
 
-export interface Credential {
-  readonly version: 1;
+export interface UnverifiedMetadata {
+  readonly zkPassProofId?: string;
+  readonly contextualProofIds?: readonly string[];
+}
+
+export interface AuthorityScope {
+  readonly capabilities: readonly string[];
+  readonly allowedActions: readonly string[];
+  readonly allowedResourceIds: readonly string[];
+}
+
+export interface Credential extends AuthorityScope {
+  readonly version: 2;
   readonly id: string;
   readonly issuerId: string;
   readonly principalId: string;
+  readonly principalType: PrincipalType;
   readonly affiliations: readonly Affiliation[];
-  readonly capabilities: readonly string[];
   readonly issuedAt: string;
   readonly expiresAt: string;
-  readonly unverifiedMetadata?: Readonly<Record<string, unknown>>;
+  readonly scopeHash: string;
+  readonly unverifiedMetadata?: UnverifiedMetadata;
+}
+
+export interface CapabilityDelegation extends AuthorityScope {
+  readonly version: 1;
+  readonly id: string;
+  readonly issuerId: string;
+  readonly grantorCredentialId: string;
+  readonly grantorId: string;
+  readonly grantorType: PrincipalType;
+  readonly delegateId: string;
+  readonly delegateType: PrincipalType;
+  readonly policyId: string;
+  readonly policyVersion: string;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  readonly scopeHash: string;
+  readonly delegationBindingHash: string;
 }
 
 export interface PolicyRule {
@@ -52,38 +115,95 @@ export interface PolicyInput {
   readonly rules: readonly PolicyRule[];
 }
 
-export interface AccessDecision {
+interface CommonAccessDecision {
+  readonly version: 2;
   readonly outcome: DecisionOutcome;
-  readonly reasonCode: string;
+  readonly reasonCode: ReasonCode;
+  readonly authorityMode: AuthorityMode;
   readonly subjectId: string;
+  readonly subjectType: PrincipalType;
+  readonly actingCredentialId: string;
+  readonly effectiveScopeHash: string;
   readonly action: string;
   readonly actionSensitivity: ActionSensitivity;
   readonly resourceId: string;
   readonly contextHash: string;
   readonly policyId: string;
   readonly policyVersion: string;
-  readonly credentialId?: string;
   readonly decidedAt: string;
+  readonly requiredApproverCapability?: string;
+  readonly unverifiedMetadata?: UnverifiedMetadata;
+}
+
+export interface DirectAccessDecision extends CommonAccessDecision {
+  readonly authorityMode: "DIRECT";
+  /** @deprecated Direct-mode compatibility alias. When present it equals actingCredentialId. */
+  readonly credentialId?: string;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
+}
+
+export interface DelegatedAccessDecision extends CommonAccessDecision {
+  readonly authorityMode: "DELEGATED";
+  readonly credentialId?: never;
+  readonly grantorId: string;
+  readonly grantorType: PrincipalType;
+  readonly grantorCredentialId: string;
+  readonly delegationId: string;
+  readonly delegationBindingHash: string;
+}
+
+export type AccessDecision = DirectAccessDecision | DelegatedAccessDecision;
+
+interface CommonReceiptBinding {
+  readonly authorityMode: AuthorityMode;
+  readonly subjectId: string;
+  readonly subjectType: PrincipalType;
+  readonly actingCredentialId: string;
+  readonly effectiveScopeHash: string;
+  readonly action: string;
+  readonly actionSensitivity: ActionSensitivity;
+  readonly resourceId: string;
+  readonly contextHash: string;
+  readonly policyId: string;
+  readonly policyVersion: string;
+  readonly decision: DecisionOutcome;
+  readonly reasonCode: ReasonCode;
   readonly requiredApproverCapability?: string;
 }
 
-export interface ReceiptPayload {
-  readonly version: 1;
-  readonly subjectId: string;
-  readonly action: string;
-  readonly actionSensitivity: ActionSensitivity;
-  readonly resourceId: string;
-  readonly contextHash: string;
-  readonly policyId: string;
-  readonly policyVersion: string;
-  readonly credentialId: string;
-  readonly decision: DecisionOutcome;
-  readonly reasonCode: string;
+interface CommonReceiptPayload extends CommonReceiptBinding {
+  readonly version: 2;
   readonly nonce: string;
   readonly decidedAt: string;
   readonly issuedAt: string;
   readonly expiresAt: string;
 }
+
+export interface DirectReceiptPayload extends CommonReceiptPayload {
+  readonly authorityMode: "DIRECT";
+  readonly credentialId: string;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
+}
+
+export interface DelegatedReceiptPayload extends CommonReceiptPayload {
+  readonly authorityMode: "DELEGATED";
+  readonly credentialId?: never;
+  readonly grantorId: string;
+  readonly grantorType: PrincipalType;
+  readonly grantorCredentialId: string;
+  readonly delegationId: string;
+  readonly delegationBindingHash: string;
+}
+
+export type ReceiptPayload = DirectReceiptPayload | DelegatedReceiptPayload;
 
 export interface SignedReceipt {
   readonly algorithm: "HMAC-SHA256";
@@ -91,55 +211,167 @@ export interface SignedReceipt {
   readonly signature: string;
 }
 
-export interface ReceiptExpectedBinding {
-  readonly subjectId: string;
-  readonly action: string;
-  readonly actionSensitivity: ActionSensitivity;
-  readonly resourceId: string;
-  readonly contextHash: string;
-  readonly policyId: string;
-  readonly policyVersion: string;
+export interface DirectReceiptExpectedBinding extends CommonReceiptBinding {
+  readonly authorityMode: "DIRECT";
   readonly credentialId: string;
-  readonly decision: DecisionOutcome;
-  readonly reasonCode: string;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
 }
 
-export interface StepUpRequest {
+export interface DelegatedReceiptExpectedBinding extends CommonReceiptBinding {
+  readonly authorityMode: "DELEGATED";
+  readonly credentialId?: never;
+  readonly grantorId: string;
+  readonly grantorType: PrincipalType;
+  readonly grantorCredentialId: string;
+  readonly delegationId: string;
+  readonly delegationBindingHash: string;
+}
+
+export type ReceiptExpectedBinding =
+  | DirectReceiptExpectedBinding
+  | DelegatedReceiptExpectedBinding;
+
+interface CommonStepUpRequest {
+  readonly version: 2;
   readonly id: string;
+  readonly authorityMode: AuthorityMode;
   readonly subjectId: string;
+  readonly subjectType: PrincipalType;
+  readonly actingCredentialId: string;
+  readonly effectiveScopeHash: string;
   readonly action: string;
   readonly actionSensitivity: ActionSensitivity;
   readonly resourceId: string;
   readonly contextHash: string;
   readonly policyId: string;
   readonly policyVersion: string;
-  readonly credentialId: string;
   readonly requiredApproverCapability: string;
   readonly requestedAt: string;
   readonly expiresAt: string;
   readonly status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
 }
 
-export interface StepUpAuthorization {
-  readonly version: 1;
+export interface DirectStepUpRequest extends CommonStepUpRequest {
+  readonly authorityMode: "DIRECT";
+  readonly credentialId?: string;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
+}
+
+export interface DelegatedStepUpRequest extends CommonStepUpRequest {
+  readonly authorityMode: "DELEGATED";
+  readonly credentialId?: never;
+  readonly grantorId: string;
+  readonly grantorType: PrincipalType;
+  readonly grantorCredentialId: string;
+  readonly delegationId: string;
+  readonly delegationBindingHash: string;
+}
+
+export type StepUpRequest = DirectStepUpRequest | DelegatedStepUpRequest;
+
+interface CommonStepUpAuthorization {
+  readonly version: 2;
   readonly id: string;
   readonly requestId: string;
+  readonly authorityMode: AuthorityMode;
   readonly subjectId: string;
+  readonly subjectType: PrincipalType;
+  readonly actingCredentialId: string;
+  readonly effectiveScopeHash: string;
   readonly action: string;
   readonly actionSensitivity: ActionSensitivity;
   readonly resourceId: string;
   readonly contextHash: string;
   readonly policyId: string;
   readonly policyVersion: string;
-  readonly credentialId: string;
+  readonly requiredApproverCapability: string;
   readonly approvedBy: string;
+  readonly approvedByType: PrincipalType;
+  readonly approverCredentialId: string;
   readonly issuedAt: string;
   readonly expiresAt: string;
 }
 
+export interface DirectStepUpAuthorization extends CommonStepUpAuthorization {
+  readonly authorityMode: "DIRECT";
+  readonly credentialId?: string;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
+}
+
+export interface DelegatedStepUpAuthorization extends CommonStepUpAuthorization {
+  readonly authorityMode: "DELEGATED";
+  readonly credentialId?: never;
+  readonly grantorId: string;
+  readonly grantorType: PrincipalType;
+  readonly grantorCredentialId: string;
+  readonly delegationId: string;
+  readonly delegationBindingHash: string;
+}
+
+export type StepUpAuthorization =
+  | DirectStepUpAuthorization
+  | DelegatedStepUpAuthorization;
+
+interface CommonStepUpAuthorizationBinding {
+  readonly authorization: StepUpAuthorization;
+  readonly requestId: string;
+  readonly authorityMode: AuthorityMode;
+  readonly subjectId: string;
+  readonly subjectType: PrincipalType;
+  readonly actingCredentialId: string;
+  readonly effectiveScopeHash: string;
+  readonly action: string;
+  readonly actionSensitivity: ActionSensitivity;
+  readonly resourceId: string;
+  readonly contextHash: string;
+  readonly policyId: string;
+  readonly policyVersion: string;
+  readonly requiredApproverCapability: string;
+  readonly approvedBy: string;
+  readonly approvedByType: PrincipalType;
+  readonly approverCredentialId: string;
+}
+
+export interface DirectStepUpAuthorizationBinding extends CommonStepUpAuthorizationBinding {
+  readonly authorityMode: "DIRECT";
+  readonly credentialId: string;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
+}
+
+export interface DelegatedStepUpAuthorizationBinding extends CommonStepUpAuthorizationBinding {
+  readonly authorityMode: "DELEGATED";
+  readonly credentialId?: never;
+  readonly grantorId: string;
+  readonly grantorType: PrincipalType;
+  readonly grantorCredentialId: string;
+  readonly delegationId: string;
+  readonly delegationBindingHash: string;
+}
+
+export type ConsumeStepUpAuthorizationRequest =
+  | DirectStepUpAuthorizationBinding
+  | DelegatedStepUpAuthorizationBinding;
+
 export interface DecisionLogEntry {
   readonly id: string;
   readonly recordedAt: string;
+  readonly principal: Principal;
   readonly decision: AccessDecision;
   readonly receipt?: {
     readonly algorithm: "HMAC-SHA256";
@@ -148,16 +380,22 @@ export interface DecisionLogEntry {
   };
 }
 
-export interface IssueCredentialRequest {
+export interface IssueCredentialRequest extends AuthorityScope {
   readonly principal: Principal;
-  readonly capabilities: readonly string[];
   readonly expiresAt: string;
-  readonly unverifiedMetadata?: Readonly<Record<string, unknown>>;
+  readonly unverifiedMetadata?: UnverifiedMetadata;
 }
 
-export interface EvaluateRequest {
+export interface IssueDelegationRequest extends AuthorityScope {
+  readonly grantor: Principal;
+  readonly grantorCredential: Credential;
+  readonly delegate: Principal;
+  readonly policy: PolicyInput;
+  readonly expiresAt: string;
+}
+
+interface CommonEvaluateRequest {
   readonly principal: Principal;
-  readonly credential: Credential | null;
   readonly action: string;
   readonly resourceId: string;
   readonly actionContext: Readonly<Record<string, unknown>>;
@@ -166,22 +404,73 @@ export interface EvaluateRequest {
   readonly receiptExpiresAt?: string;
 }
 
+export interface DirectEvaluateRequest extends CommonEvaluateRequest {
+  readonly authorityMode: "DIRECT";
+  readonly credential: Credential | null;
+  readonly delegateIdentityCredential?: never;
+  readonly grantorCredential?: never;
+  readonly delegation?: never;
+}
+
+export interface DelegatedEvaluateRequest extends CommonEvaluateRequest {
+  readonly authorityMode: "DELEGATED";
+  readonly credential?: never;
+  readonly delegateIdentityCredential: Credential;
+  readonly grantorCredential: Credential;
+  readonly delegation: CapabilityDelegation;
+}
+
+export type EvaluateRequest = DirectEvaluateRequest | DelegatedEvaluateRequest;
+
 export interface ResolveStepUpRequest {
   readonly resolution: "APPROVE" | "REJECT";
   readonly approver: Principal;
   readonly approverCredential: Credential;
 }
 
-export interface ConsumeStepUpAuthorizationRequest {
-  readonly authorization: StepUpAuthorization;
-  readonly subjectId: string;
-  readonly action: string;
-  readonly actionSensitivity: ActionSensitivity;
-  readonly resourceId: string;
-  readonly contextHash: string;
+export type VerificationStatus = "ACTIVE" | "REVOKED" | "EXPIRED" | "INVALID";
+export type EligibleActionStatus = "ELIGIBLE" | "APPROVAL_REQUIRED" | "INELIGIBLE";
+export type RequiredApprovalStatus =
+  | "NOT_REQUIRED"
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "EXPIRED";
+export type ReceiptState = "NOT_ISSUED" | "UNCONSUMED" | "CONSUMED" | "REJECTED";
+
+export interface DelegatedScopeView {
+  readonly delegationId: string;
+  readonly grantorId: string;
+  readonly grantorType: PrincipalType;
+  readonly capabilities: readonly string[];
+  readonly allowedActions: readonly string[];
+  readonly allowedResourceIds: readonly string[];
+  readonly status: VerificationStatus;
+}
+
+export interface OnboardingView {
+  readonly version: 1;
+  readonly referenceOnly: true;
+  readonly decisionLogId: string;
+  readonly verificationStatus: VerificationStatus;
+  readonly principal: Principal;
+  readonly authorityMode: AuthorityMode;
+  readonly delegatedScope: DelegatedScopeView | null;
+  readonly eligibleActions: readonly {
+    readonly action: string;
+    readonly resourceId: string;
+    readonly status: EligibleActionStatus;
+    readonly reasonCode: string;
+  }[];
+  readonly requiredApproval: {
+    readonly status: RequiredApprovalStatus;
+    readonly requestId?: string;
+  };
+  readonly receipt: {
+    readonly status: ReceiptState;
+  };
   readonly policyId: string;
   readonly policyVersion: string;
-  readonly credentialId: string;
 }
 
 export class ZkycApiError extends Error {
@@ -259,20 +548,28 @@ export class ZkycReferenceClient {
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         throw new ZkycTransportError("INVALID_RESPONSE");
       }
-      const record = parsed as Record<string, unknown>;
-      if (Object.keys(record).length !== 1 || !Object.hasOwn(record, "error") ||
-        typeof record.error !== "object" || record.error === null || Array.isArray(record.error)) {
+      const envelope = parsed as Record<string, unknown>;
+      if (
+        Object.keys(envelope).length !== 1 ||
+        !Object.hasOwn(envelope, "error") ||
+        typeof envelope.error !== "object" ||
+        envelope.error === null ||
+        Array.isArray(envelope.error)
+      ) {
         throw new ZkycTransportError("INVALID_RESPONSE");
       }
-      const errorRecord = record.error as Record<string, unknown>;
-      if (Object.keys(errorRecord).some((key) => key !== "code" && key !== "message") ||
-        !Object.hasOwn(errorRecord, "code") || !Object.hasOwn(errorRecord, "message") ||
-        typeof errorRecord.code !== "string" || !/^[A-Z][A-Z0-9_]*$/.test(errorRecord.code) ||
-        typeof errorRecord.message !== "string") {
+      const error = envelope.error as Record<string, unknown>;
+      if (
+        Object.keys(error).some((key) => key !== "code" && key !== "message") ||
+        !Object.hasOwn(error, "code") ||
+        !Object.hasOwn(error, "message") ||
+        typeof error.code !== "string" ||
+        !/^[A-Z][A-Z0-9_]*$/.test(error.code) ||
+        typeof error.message !== "string"
+      ) {
         throw new ZkycTransportError("INVALID_RESPONSE");
       }
-      const code = errorRecord.code;
-      throw new ZkycApiError(response.status, code);
+      throw new ZkycApiError(response.status, error.code);
     }
     try {
       return validate(parsed);
@@ -301,6 +598,19 @@ export class ZkycReferenceClient {
     );
   }
 
+  issueDelegation(input: IssueDelegationRequest) {
+    return this.#request("delegations", validateDelegationResponse, "POST", input);
+  }
+
+  revokeDelegation(delegationId: string, input: { readonly reason: string }) {
+    return this.#request(
+      `delegations/${encodeURIComponent(delegationId)}/revoke`,
+      validateRevocationResponse,
+      "POST",
+      input,
+    );
+  }
+
   evaluate(input: EvaluateRequest) {
     return this.#request("evaluations", validateEvaluationResponse, "POST", input);
   }
@@ -323,11 +633,13 @@ export class ZkycReferenceClient {
   }
 
   consumeReceipt(input: { readonly receipt: SignedReceipt; readonly expected: ReceiptExpectedBinding }) {
+    return this.#request("receipts/consume", validateReceiptConsumeResponse, "POST", input);
+  }
+
+  getOnboardingView(decisionLogId: string) {
     return this.#request(
-      "receipts/consume",
-      validateReceiptConsumeResponse,
-      "POST",
-      input,
+      `zkya/onboarding-views/${encodeURIComponent(decisionLogId)}`,
+      validateOnboardingView,
     );
   }
 
