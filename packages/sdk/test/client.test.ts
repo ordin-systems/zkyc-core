@@ -379,12 +379,166 @@ const staticDecision: AccessDecision = {
   decidedAt: START,
 };
 
+const staticDelegation: CapabilityDelegation = {
+  version: 1,
+  id: "delegation:static",
+  issuerId: "issuer:static",
+  grantorCredentialId: staticCredential.id,
+  grantorId: human.id,
+  grantorType: human.type,
+  delegateId: "agent:static",
+  delegateType: "AGENT",
+  policyId: staticDecision.policyId,
+  policyVersion: staticDecision.policyVersion,
+  capabilities: ["records:read"],
+  allowedActions: ["records:read"],
+  allowedResourceIds: [RESOURCE],
+  issuedAt: START,
+  expiresAt: EXPIRY,
+  scopeHash: HASH_0,
+  delegationBindingHash: HASH_1,
+};
+
+const staticView: OnboardingView = {
+  version: 1,
+  referenceOnly: true,
+  decisionLogId: "decision-log:static",
+  verificationStatus: "ACTIVE",
+  principal: human,
+  authorityMode: "DIRECT",
+  delegatedScope: null,
+  eligibleActions: [{
+    action: "records:read",
+    resourceId: RESOURCE,
+    status: "ELIGIBLE",
+    reasonCode: "POLICY_ALLOW",
+  }],
+  requiredApproval: { status: "NOT_REQUIRED" },
+  receipt: { status: "NOT_ISSUED" },
+  policyId: staticDecision.policyId,
+  policyVersion: staticDecision.policyVersion,
+};
+
+const staticAuthorization: StepUpAuthorization = {
+  version: 2,
+  id: "step-up-authorization:static",
+  requestId: "step-up-request:static",
+  authorityMode: "DIRECT",
+  subjectId: human.id,
+  subjectType: human.type,
+  actingCredentialId: staticCredential.id,
+  effectiveScopeHash: staticCredential.scopeHash,
+  action: "records:export",
+  actionSensitivity: "SENSITIVE",
+  resourceId: RESOURCE,
+  contextHash: HASH_0,
+  policyId: "policy:step-up",
+  policyVersion: HASH_1,
+  credentialId: staticCredential.id,
+  requiredApproverCapability: "approval:records-export",
+  approvedBy: human.id,
+  approvedByType: human.type,
+  approverCredentialId: staticCredential.id,
+  issuedAt: START,
+  expiresAt: ARTIFACT_EXPIRY,
+};
+
 async function expectInvalidResponse(action: () => Promise<unknown>): Promise<void> {
   await assert.rejects(
     action,
     (error: unknown) => error instanceof ZkycTransportError && error.code === "INVALID_RESPONSE",
   );
 }
+
+test("SDK rejects valid responses bound to a different requested authority record", async () => {
+  const credentialClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      credential: { ...staticCredential, principalId: "principal:other" },
+    }, 201)),
+  });
+  await expectInvalidResponse(() => credentialClient.issueCredential({
+    principal: human,
+    capabilities: staticCredential.capabilities,
+    allowedActions: staticCredential.allowedActions,
+    allowedResourceIds: staticCredential.allowedResourceIds,
+    expiresAt: staticCredential.expiresAt,
+  }));
+
+  const delegate: Principal = { id: staticDelegation.delegateId, type: "AGENT", affiliations: [] };
+  const delegationClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      delegation: { ...staticDelegation, delegateId: "agent:other" },
+    }, 201)),
+  });
+  await expectInvalidResponse(() => delegationClient.issueDelegation({
+    grantor: human,
+    grantorCredential: staticCredential,
+    delegate,
+    policy: { id: staticDelegation.policyId, rules: [] },
+    capabilities: staticDelegation.capabilities,
+    allowedActions: staticDelegation.allowedActions,
+    allowedResourceIds: staticDelegation.allowedResourceIds,
+    expiresAt: staticDelegation.expiresAt,
+  }));
+
+  const evaluationClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      logId: "decision-log:static",
+      decision: { ...staticDecision, subjectId: "principal:other" },
+    })),
+  });
+  await expectInvalidResponse(() => evaluationClient.evaluate({
+    authorityMode: "DIRECT",
+    principal: human,
+    credential: staticCredential,
+    action: staticDecision.action,
+    resourceId: staticDecision.resourceId,
+    actionContext: {},
+    policy: { id: staticDecision.policyId, rules: [] },
+    issueReceipt: false,
+  }));
+
+  const onboardingClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      ...staticView,
+      decisionLogId: "decision-log:other",
+    })),
+  });
+  await expectInvalidResponse(() => onboardingClient.getOnboardingView(staticView.decisionLogId));
+
+  const resolutionClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      ok: true,
+      authorization: { ...staticAuthorization, requestId: "step-up-request:other" },
+    })),
+  });
+  await expectInvalidResponse(() => resolutionClient.resolveStepUpRequest(staticAuthorization.requestId, {
+    resolution: "APPROVE",
+    approver: human,
+    approverCredential: staticCredential,
+  }));
+});
+
+test("SDK rejects valid decision-log entries whose duplicated principal identity conflicts", async () => {
+  const client = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      referenceOnly: true,
+      entries: [{
+        id: "decision-log:static",
+        recordedAt: START,
+        principal: { ...human, id: "principal:other" },
+        decision: staticDecision,
+      }],
+    })),
+  });
+  await expectInvalidResponse(() => client.getDecisionLog());
+});
 
 test("SDK rejects v0.3 successful responses with missing, unknown, or mixed authority bindings", async () => {
   const issueInput = {

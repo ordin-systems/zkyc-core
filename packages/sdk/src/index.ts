@@ -500,6 +500,10 @@ export interface ZkycReferenceClientOptions {
   readonly fetch?: FetchLike;
 }
 
+function requireResponseCorrelation(condition: boolean): void {
+  if (!condition) throw new InvalidProtocolResponse();
+}
+
 export class ZkycReferenceClient {
   readonly #baseUrl: URL;
   readonly #fetch: FetchLike;
@@ -586,7 +590,14 @@ export class ZkycReferenceClient {
   }
 
   issueCredential(input: IssueCredentialRequest) {
-    return this.#request("credentials", validateCredentialResponse, "POST", input);
+    return this.#request("credentials", (value) => {
+      const response = validateCredentialResponse(value);
+      requireResponseCorrelation(
+        response.credential.principalId === input.principal.id &&
+        response.credential.principalType === input.principal.type,
+      );
+      return response;
+    }, "POST", input);
   }
 
   revokeCredential(credentialId: string, input: { readonly reason: string }) {
@@ -599,7 +610,19 @@ export class ZkycReferenceClient {
   }
 
   issueDelegation(input: IssueDelegationRequest) {
-    return this.#request("delegations", validateDelegationResponse, "POST", input);
+    return this.#request("delegations", (value) => {
+      const response = validateDelegationResponse(value);
+      const delegation = response.delegation;
+      requireResponseCorrelation(
+        delegation.grantorCredentialId === input.grantorCredential.id &&
+        delegation.grantorId === input.grantor.id &&
+        delegation.grantorType === input.grantor.type &&
+        delegation.delegateId === input.delegate.id &&
+        delegation.delegateType === input.delegate.type &&
+        delegation.policyId === input.policy.id,
+      );
+      return response;
+    }, "POST", input);
   }
 
   revokeDelegation(delegationId: string, input: { readonly reason: string }) {
@@ -612,7 +635,38 @@ export class ZkycReferenceClient {
   }
 
   evaluate(input: EvaluateRequest) {
-    return this.#request("evaluations", validateEvaluationResponse, "POST", input);
+    return this.#request("evaluations", (value) => {
+      const response = validateEvaluationResponse(value);
+      const decision = response.decision;
+      requireResponseCorrelation(
+        decision.authorityMode === input.authorityMode &&
+        decision.subjectId === input.principal.id &&
+        decision.subjectType === input.principal.type &&
+        decision.action === input.action &&
+        decision.resourceId === input.resourceId &&
+        decision.policyId === input.policy.id,
+      );
+      if (input.authorityMode === "DIRECT") {
+        if (input.credential !== null) {
+          requireResponseCorrelation(
+            decision.actingCredentialId === input.credential.id &&
+            decision.effectiveScopeHash === input.credential.scopeHash,
+          );
+        }
+      } else {
+        requireResponseCorrelation(
+          decision.authorityMode === "DELEGATED" &&
+          decision.actingCredentialId === input.delegateIdentityCredential.id &&
+          decision.effectiveScopeHash === input.delegation.scopeHash &&
+          decision.grantorId === input.delegation.grantorId &&
+          decision.grantorType === input.delegation.grantorType &&
+          decision.grantorCredentialId === input.delegation.grantorCredentialId &&
+          decision.delegationId === input.delegation.id &&
+          decision.delegationBindingHash === input.delegation.delegationBindingHash,
+        );
+      }
+      return response;
+    }, "POST", input);
   }
 
   createStepUpRequest(input: { readonly decisionLogId: string; readonly expiresAt: string }) {
@@ -622,7 +676,18 @@ export class ZkycReferenceClient {
   resolveStepUpRequest(requestId: string, input: ResolveStepUpRequest) {
     return this.#request(
       `step-up/requests/${encodeURIComponent(requestId)}/resolve`,
-      validateResolutionResponse,
+      (value) => {
+        const response = validateResolutionResponse(value);
+        if (response.ok) {
+          requireResponseCorrelation(
+            response.authorization.requestId === requestId &&
+            response.authorization.approvedBy === input.approver.id &&
+            response.authorization.approvedByType === input.approver.type &&
+            response.authorization.approverCredentialId === input.approverCredential.id,
+          );
+        }
+        return response;
+      },
       "POST",
       input,
     );
@@ -639,7 +704,11 @@ export class ZkycReferenceClient {
   getOnboardingView(decisionLogId: string) {
     return this.#request(
       `zkya/onboarding-views/${encodeURIComponent(decisionLogId)}`,
-      validateOnboardingView,
+      (value) => {
+        const response = validateOnboardingView(value);
+        requireResponseCorrelation(response.decisionLogId === decisionLogId);
+        return response;
+      },
     );
   }
 

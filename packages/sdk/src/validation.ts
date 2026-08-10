@@ -858,10 +858,15 @@ function validateLogEntry(value: unknown): DecisionLogEntry {
     ["id", "recordedAt", "principal", "decision"],
   );
   const decision = validateDecisionValue(item.decision);
+  const retainedPrincipal = principal(item.principal);
+  if (
+    retainedPrincipal.id !== decision.subjectId ||
+    retainedPrincipal.type !== decision.subjectType
+  ) invalid();
   const common = {
     id: identifier(item.id),
     recordedAt: timestamp(item.recordedAt),
-    principal: principal(item.principal),
+    principal: retainedPrincipal,
     decision,
   };
   if (item.receipt === undefined) return common;
