@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "npm --prefix ../.. run build --silent && npm --prefix ../.. run build -w @ordin/zkyc-core-api-reference --silent && npm --prefix ../.. run build -w @ordin/zkyc-sdk-reference --silent && tsc --noEmit",
-    "build": "npm --prefix ../.. run build --silent && npm --prefix ../.. run build -w @ordin/zkyc-core-api-reference --silent && npm --prefix ../.. run build -w @ordin/zkyc-sdk-reference --silent && tsc --noEmit && vite build",
+    "build": "npm --prefix ../.. run build --silent && npm --prefix ../.. run build -w @ordin/zkyc-core-api-reference --silent && npm --prefix ../.. run build -w @ordin/zkyc-sdk-reference --silent && node ../../scripts/clean.mjs dist && tsc --noEmit && vite build",
     "dev": "vite",
     "preview": "vite preview",
     "test": "npm --prefix ../.. run build --silent && npm --prefix ../.. run build -w @ordin/zkyc-core-api-reference --silent && npm --prefix ../.. run build -w @ordin/zkyc-sdk-reference --silent && vitest run"
