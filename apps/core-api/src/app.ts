@@ -22,6 +22,7 @@ import {
   type SignedReceipt,
   type StepUpAuthorization,
   type StepUpAuthorizationBinding,
+  type StepUpAuthorizationUsability,
   type StepUpStatus,
 } from "@ordin/zkyc-core-reference";
 
@@ -400,6 +401,7 @@ function eligibleAction(
   entry: RetainedDecisionLogEntry,
   authority: AuthoritySnapshot,
   approval: { readonly status: RequiredApprovalStatus },
+  authorizationUsability: StepUpAuthorizationUsability | undefined,
 ): {
   readonly action: string;
   readonly resourceId: string;
@@ -417,13 +419,26 @@ function eligibleAction(
     return { ...common, status: "INELIGIBLE", reasonCode: entry.decision.reasonCode };
   }
   if (approval.status === "APPROVED") {
+    if (authorizationUsability?.usable !== true) {
+      return {
+        ...common,
+        status: "INELIGIBLE",
+        reasonCode: authorizationUsability?.reasonCode ?? "STEP_UP_NOT_FOUND",
+      };
+    }
     return { ...common, status: "ELIGIBLE", reasonCode: "STEP_UP_APPROVED" };
   }
   if (approval.status === "REJECTED") {
     return { ...common, status: "INELIGIBLE", reasonCode: "STEP_UP_REJECTED" };
   }
   if (approval.status === "EXPIRED") {
-    return { ...common, status: "INELIGIBLE", reasonCode: "STEP_UP_EXPIRED" };
+    return {
+      ...common,
+      status: "INELIGIBLE",
+      reasonCode: authorizationUsability?.usable === false
+        ? authorizationUsability.reasonCode
+        : "STEP_UP_EXPIRED",
+    };
   }
   return { ...common, status: "APPROVAL_REQUIRED", reasonCode: entry.decision.reasonCode };
 }
@@ -802,13 +817,19 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
     const now = options.clock();
     const authority = authoritySnapshot(retained, credentialAuthority, delegationAuthority, now);
     const requestId = requestByDecisionLogId.get(decisionLogId);
+    const authorization = requestId === undefined
+      ? undefined
+      : authorizationByRequestId.get(requestId);
     const approval = currentApproval(
       retained,
       requestId,
-      requestId === undefined ? undefined : authorizationByRequestId.get(requestId),
+      authorization,
       stepUpService,
       now,
     );
+    const authorizationUsability = authorization === undefined
+      ? undefined
+      : stepUpService.inspectAuthorization({ authorization, at: now });
     const receiptStatus = retained.receipt === undefined
       ? "NOT_ISSUED"
       : receiptStatusBySignatureHash.get(retained.receipt.signatureHash) ?? "UNCONSUMED";
@@ -831,7 +852,12 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
       principal: retained.principal,
       authorityMode: retained.decision.authorityMode,
       delegatedScope,
-      eligibleActions: [eligibleAction(retained, authority, approval)],
+      eligibleActions: [eligibleAction(
+        retained,
+        authority,
+        approval,
+        authorizationUsability,
+      )],
       requiredApproval: approval,
       receipt: { status: receiptStatus },
       policyId: retained.decision.policyId,

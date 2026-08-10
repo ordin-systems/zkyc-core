@@ -62,6 +62,8 @@ export {
   type DirectStepUpRequest,
   type StepUpAuthorization,
   type StepUpAuthorizationBinding,
+  type StepUpAuthorizationUsability,
+  type StepUpAuthorizationUsabilityCode,
   type StepUpFailureCode,
   type StepUpRequest,
   type StepUpResolutionResult,

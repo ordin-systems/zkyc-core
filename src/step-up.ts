@@ -173,6 +173,27 @@ export type StepUpResolutionResult =
   | { readonly ok: true; readonly authorization: StepUpAuthorization }
   | { readonly ok: false; readonly reasonCode: StepUpFailureCode };
 
+export type StepUpAuthorizationUsabilityCode =
+  | "STEP_UP_AUTHORIZATION_USABLE"
+  | "STEP_UP_AUTHORIZATION_CONSUMED"
+  | "STEP_UP_NOT_FOUND"
+  | "STEP_UP_NOT_YET_VALID"
+  | "STEP_UP_EXPIRED"
+  | "SUBJECT_AUTHORITY_INVALID"
+  | "APPROVER_CREDENTIAL_INVALID"
+  | "APPROVER_CREDENTIAL_REVOKED"
+  | "APPROVER_CREDENTIAL_EXPIRED"
+  | "APPROVER_CAPABILITY_MISSING"
+  | "APPROVER_SCOPE_MISSING"
+  | "INVALID_INPUT";
+
+export type StepUpAuthorizationUsability =
+  | { readonly usable: true; readonly reasonCode: "STEP_UP_AUTHORIZATION_USABLE" }
+  | { readonly usable: false; readonly reasonCode: Exclude<
+    StepUpAuthorizationUsabilityCode,
+    "STEP_UP_AUTHORIZATION_USABLE"
+  > };
+
 interface RequestRecord {
   request: StepUpRequest;
   authorization?: StepUpAuthorization;
@@ -479,6 +500,7 @@ export class HumanStepUpService {
   readonly #nonceStore: AtomicNonceStore;
   readonly #requests = new Map<string, RequestRecord>();
   readonly #authorizations = new Map<string, StepUpAuthorization>();
+  readonly #consumedAuthorizationIds = new Set<string>();
 
   constructor(input: {
     credentialAuthority: CredentialAuthority;
@@ -773,44 +795,109 @@ export class HumanStepUpService {
       const at = validateTimestamp(inputRecord.at, "authorization consumption time");
       const expected = this.#validateExpectedBinding(inputRecord, registered.authorityMode);
       if (!this.#matchesExpectedBinding(registered, expected)) return false;
-      if (
-        timestampMillis(at) < timestampMillis(registered.issuedAt) ||
-        timestampMillis(at) >= timestampMillis(registered.expiresAt)
-      ) {
-        return false;
-      }
-      const requestRecord = this.#requests.get(registered.requestId);
-      if (
-        requestRecord?.authorization === undefined ||
-        requestRecord.request.status !== "APPROVED" ||
-        canonicalJson(requestRecord.authorization) !== canonicalJson(registered)
-      ) {
-        return false;
-      }
-      if (this.#activeRequestArtifacts(requestRecord.request, at) === undefined) return false;
-      const approverCredential = this.#credentialAuthority.getActiveCredentialById(
-        registered.approverCredentialId,
-        at,
-        registered.approvedBy,
-        registered.approvedByType,
-      );
-      if (
-        approverCredential === undefined ||
-        registered.approvedByType !== PrincipalType.HUMAN ||
-        !approverCredential.capabilities.includes(registered.requiredApproverCapability) ||
-        !approverCredential.allowedActions.includes("step-up:resolve") ||
-        !approverCredential.allowedResourceIds.includes(registered.resourceId)
-      ) {
-        return false;
-      }
-      return this.#nonceStore.consume(
+      if (!this.#inspectRegisteredAuthorization(registered, at).usable) return false;
+      const consumed = await this.#nonceStore.consume(
         `step-up-authorization:${registered.id}`,
         registered.expiresAt,
         at,
       );
+      if (consumed) this.#consumedAuthorizationIds.add(registered.id);
+      return consumed;
     } catch {
       return false;
     }
+  }
+
+  inspectAuthorization(input: {
+    readonly authorization: StepUpAuthorization;
+    readonly at: string;
+  }): StepUpAuthorizationUsability {
+    try {
+      const inputRecord = requireRecord(input, "step-up authorization inspection input");
+      rejectUnknownKeys(
+        inputRecord,
+        ["authorization", "at"],
+        "step-up authorization inspection input",
+      );
+      const authorization = validateAuthorization(inputRecord.authorization);
+      const registered = this.#authorizations.get(authorization.id);
+      if (
+        registered === undefined ||
+        canonicalJson(registered) !== canonicalJson(authorization)
+      ) {
+        return { usable: false, reasonCode: "STEP_UP_NOT_FOUND" };
+      }
+      const at = validateTimestamp(inputRecord.at, "authorization inspection time");
+      return this.#inspectRegisteredAuthorization(registered, at);
+    } catch {
+      return { usable: false, reasonCode: "INVALID_INPUT" };
+    }
+  }
+
+  #inspectRegisteredAuthorization(
+    authorization: StepUpAuthorization,
+    at: string,
+  ): StepUpAuthorizationUsability {
+    const requestRecord = this.#requests.get(authorization.requestId);
+    if (
+      requestRecord?.authorization === undefined ||
+      requestRecord.request.status !== "APPROVED" ||
+      canonicalJson(requestRecord.authorization) !== canonicalJson(authorization)
+    ) {
+      return { usable: false, reasonCode: "STEP_UP_NOT_FOUND" };
+    }
+    if (timestampMillis(at) < timestampMillis(authorization.issuedAt)) {
+      return { usable: false, reasonCode: "STEP_UP_NOT_YET_VALID" };
+    }
+    if (this.#activeRequestArtifacts(requestRecord.request, at) === undefined) {
+      return { usable: false, reasonCode: "SUBJECT_AUTHORITY_INVALID" };
+    }
+    if (authorization.approvedByType !== PrincipalType.HUMAN) {
+      return { usable: false, reasonCode: "APPROVER_CREDENTIAL_INVALID" };
+    }
+    const approverStatus = this.#credentialAuthority.checkCredentialById(
+      authorization.approverCredentialId,
+      at,
+      authorization.approvedBy,
+      authorization.approvedByType,
+    );
+    if (!approverStatus.valid) {
+      if (approverStatus.code === "CREDENTIAL_REVOKED") {
+        return { usable: false, reasonCode: "APPROVER_CREDENTIAL_REVOKED" };
+      }
+      if (approverStatus.code === "CREDENTIAL_EXPIRED") {
+        return { usable: false, reasonCode: "APPROVER_CREDENTIAL_EXPIRED" };
+      }
+      return { usable: false, reasonCode: "APPROVER_CREDENTIAL_INVALID" };
+    }
+    const approverCredential = this.#credentialAuthority.getActiveCredentialById(
+      authorization.approverCredentialId,
+      at,
+      authorization.approvedBy,
+      authorization.approvedByType,
+    );
+    if (approverCredential === undefined) {
+      return { usable: false, reasonCode: "APPROVER_CREDENTIAL_INVALID" };
+    }
+    if (!approverCredential.capabilities.includes(authorization.requiredApproverCapability)) {
+      return { usable: false, reasonCode: "APPROVER_CAPABILITY_MISSING" };
+    }
+    if (
+      !approverCredential.allowedActions.includes("step-up:resolve") ||
+      !approverCredential.allowedResourceIds.includes(authorization.resourceId)
+    ) {
+      return { usable: false, reasonCode: "APPROVER_SCOPE_MISSING" };
+    }
+    if (
+      timestampMillis(at) >= timestampMillis(requestRecord.request.expiresAt) ||
+      timestampMillis(at) >= timestampMillis(authorization.expiresAt)
+    ) {
+      return { usable: false, reasonCode: "STEP_UP_EXPIRED" };
+    }
+    if (this.#consumedAuthorizationIds.has(authorization.id)) {
+      return { usable: false, reasonCode: "STEP_UP_AUTHORIZATION_CONSUMED" };
+    }
+    return { usable: true, reasonCode: "STEP_UP_AUTHORIZATION_USABLE" };
   }
 
   #activeDecisionArtifacts(

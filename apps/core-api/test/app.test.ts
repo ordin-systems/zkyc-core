@@ -316,13 +316,17 @@ async function onboarding(
   return result.body as OnboardingView;
 }
 
-async function issueApprover(app: ReturnType<typeof createReferenceApp>): Promise<Credential> {
+async function issueApprover(
+  app: ReturnType<typeof createReferenceApp>,
+  expiresAt = EXPIRY,
+): Promise<Credential> {
   return issueCredential(app, {
     principalId: "principal:approver",
     principalType: PrincipalType.HUMAN,
     capabilities: ["approval:records-export"],
     allowedActions: ["step-up:resolve"],
     allowedResourceIds: [RESOURCE],
+    expiresAt,
   });
 }
 
@@ -598,11 +602,27 @@ test("direct step-up state refreshes through pending, approval, and one-time con
     body: binding,
   });
   assert.deepEqual(consumed.body, { authorized: true });
+  const consumedView = await onboarding(app, output.logId);
+  assert.deepEqual(consumedView.requiredApproval, {
+    status: "APPROVED",
+    requestId: request.id,
+  });
+  assert.equal(consumedView.eligibleActions[0]?.status, "INELIGIBLE");
+  assert.equal(
+    consumedView.eligibleActions[0]?.reasonCode,
+    "STEP_UP_AUTHORIZATION_CONSUMED",
+  );
   const replay = await requestJson(app, "/step-up/authorizations/consume", {
     method: "POST",
     body: binding,
   });
   assert.deepEqual(replay.body, { authorized: false });
+  const replayView = await onboarding(app, output.logId);
+  assert.equal(replayView.eligibleActions[0]?.status, "INELIGIBLE");
+  assert.equal(
+    replayView.eligibleActions[0]?.reasonCode,
+    "STEP_UP_AUTHORIZATION_CONSUMED",
+  );
 
   setNow(RECEIPT_EXPIRY);
   const expiredAuthorizationView = await onboarding(app, output.logId);
@@ -654,7 +674,127 @@ test("delegated step-up consume requires and honors every delegated v2 binding",
     body: complete,
   });
   assert.deepEqual(consumed.body, { authorized: true });
-  assert.equal((await onboarding(app, output.logId)).requiredApproval.status, "APPROVED");
+  const consumedView = await onboarding(app, output.logId);
+  assert.equal(consumedView.requiredApproval.status, "APPROVED");
+  assert.equal(consumedView.eligibleActions[0]?.status, "INELIGIBLE");
+  assert.equal(
+    consumedView.eligibleActions[0]?.reasonCode,
+    "STEP_UP_AUTHORIZATION_CONSUMED",
+  );
+});
+
+test("direct step-up refresh revalidates approver revocation and expiry", async () => {
+  for (const invalidation of ["revoked", "expired"] as const) {
+    const { app, setNow } = harness();
+    const subject = await issueCredential(app, {
+      capabilities: ["records:export"],
+      allowedActions: ["records:export"],
+    });
+    const evaluated = await evaluateDirect(app, subject, {
+      effect: "STEP_UP",
+      action: "records:export",
+    });
+    const output = evaluated.body as { logId: string; decision: AccessDecision };
+    const request = await createStepUpRequest(app, output.logId);
+    const approverExpiry = invalidation === "expired"
+      ? "2026-06-01T00:12:00.000Z"
+      : EXPIRY;
+    const approverCredential = await issueApprover(app, approverExpiry);
+    setNow(LATER);
+    const resolved = await requestJson(
+      app,
+      `/step-up/requests/${encodeURIComponent(request.id)}/resolve`,
+      {
+        method: "POST",
+        body: {
+          resolution: "APPROVE",
+          approver: principalFor(approverCredential),
+          approverCredential,
+        },
+      },
+    );
+    assert.equal((resolved.body as { ok: boolean }).ok, true);
+
+    if (invalidation === "revoked") {
+      const revoked = await requestJson(
+        app,
+        `/credentials/${encodeURIComponent(approverCredential.id)}/revoke`,
+        { method: "POST", body: { reason: "approver-authority-withdrawn" } },
+      );
+      assert.deepEqual(revoked.body, { revoked: true });
+    } else {
+      setNow(approverExpiry);
+    }
+
+    const refreshed = await onboarding(app, output.logId);
+    assert.equal(refreshed.eligibleActions[0]?.status, "INELIGIBLE");
+    assert.equal(
+      refreshed.eligibleActions[0]?.reasonCode,
+      invalidation === "revoked"
+        ? "APPROVER_CREDENTIAL_REVOKED"
+        : "APPROVER_CREDENTIAL_EXPIRED",
+    );
+  }
+});
+
+test("delegated step-up refresh revalidates retained subject and approver authority", async () => {
+  for (const invalidation of ["acting", "grantor", "delegation", "approver"] as const) {
+    const { app, setNow } = harness();
+    const artifacts = await delegatedArtifacts(app, "STEP_UP");
+    const evaluated = await evaluateDelegated(
+      app,
+      artifacts.delegateIdentityCredential,
+      artifacts.grantorCredential,
+      artifacts.delegation,
+      { effect: "STEP_UP", action: "records:export" },
+    );
+    const output = evaluated.body as { logId: string; decision: AccessDecision };
+    const request = await createStepUpRequest(app, output.logId);
+    const approverCredential = await issueApprover(app);
+    setNow(LATER);
+    const resolved = await requestJson(
+      app,
+      `/step-up/requests/${encodeURIComponent(request.id)}/resolve`,
+      {
+        method: "POST",
+        body: {
+          resolution: "APPROVE",
+          approver: principalFor(approverCredential),
+          approverCredential,
+        },
+      },
+    );
+    assert.equal((resolved.body as { ok: boolean }).ok, true);
+
+    if (invalidation === "delegation") {
+      await requestJson(
+        app,
+        `/delegations/${encodeURIComponent(artifacts.delegation.id)}/revoke`,
+        { method: "POST", body: { reason: "delegated-authority-withdrawn" } },
+      );
+    } else {
+      const credentialId = invalidation === "acting"
+        ? artifacts.delegateIdentityCredential.id
+        : invalidation === "grantor"
+        ? artifacts.grantorCredential.id
+        : approverCredential.id;
+      await requestJson(app, `/credentials/${encodeURIComponent(credentialId)}/revoke`, {
+        method: "POST",
+        body: { reason: `${invalidation}-authority-withdrawn` },
+      });
+    }
+
+    const refreshed = await onboarding(app, output.logId);
+    assert.equal(refreshed.eligibleActions[0]?.status, "INELIGIBLE");
+    assert.equal(
+      refreshed.eligibleActions[0]?.reasonCode,
+      invalidation === "delegation"
+        ? "DELEGATION_REVOKED"
+        : invalidation === "approver"
+        ? "APPROVER_CREDENTIAL_REVOKED"
+        : "CREDENTIAL_REVOKED",
+    );
+  }
 });
 
 test("step-up rejection and expiry are visible on onboarding refresh", async () => {

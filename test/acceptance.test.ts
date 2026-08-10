@@ -614,7 +614,21 @@ test("7 human step-up approval is bound and consumable exactly once", async () =
     ...stepUpBinding(resolved.authorization),
     at: "2026-06-01T00:12:00.000Z",
   };
+  assert.deepEqual(
+    service.inspectAuthorization({
+      authorization: resolved.authorization,
+      at: consumeInput.at,
+    }),
+    { usable: true, reasonCode: "STEP_UP_AUTHORIZATION_USABLE" },
+  );
   assert.equal(await service.consumeAuthorization(consumeInput), true);
+  assert.deepEqual(
+    service.inspectAuthorization({
+      authorization: resolved.authorization,
+      at: consumeInput.at,
+    }),
+    { usable: false, reasonCode: "STEP_UP_AUTHORIZATION_CONSUMED" },
+  );
   assert.equal(await service.consumeAuthorization(consumeInput), false);
 });
 
