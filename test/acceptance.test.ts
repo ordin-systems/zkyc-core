@@ -9,6 +9,7 @@ import {
   DomainValidationError,
   HumanStepUpService,
   InMemoryAtomicNonceStore,
+  PolicyRegistry,
   PrincipalType,
   canonicalJson,
   computeDelegationBindingHash,
@@ -60,29 +61,10 @@ interface HarnessOptions {
 }
 
 function createHarness(options: HarnessOptions = {}) {
-  const authority = new CredentialAuthority({ issuerId: "issuer:ordin" });
   const principal = options.principal ?? createPrincipal({
     id: "principal:alice",
     type: PrincipalType.HUMAN,
     affiliations: [MEMBER_AFFILIATION],
-  });
-  const credential = authority.issueCredential({
-    id: "credential:alice",
-    principal,
-    capabilities: options.credentialCapabilities ?? ["records:read", "records:export"],
-    allowedActions: options.credentialAllowedActions ?? [
-      "records:delete",
-      "records:export",
-      "records:publish",
-      "records:read",
-    ],
-    allowedResourceIds: options.credentialAllowedResourceIds ?? [
-      "dataset:7",
-      "record:customer-7",
-    ],
-    issuedAt: ISSUED_AT,
-    expiresAt: options.credentialExpiresAt ?? EXPIRES_AT,
-    ...(options.metadata === undefined ? {} : { unverifiedMetadata: options.metadata }),
   });
   const policy = createPolicy({
     id: "policy:ordin-reference",
@@ -111,7 +93,27 @@ function createHarness(options: HarnessOptions = {}) {
       },
     ],
   });
-  return { authority, principal, credential, policy };
+  const policyRegistry = new PolicyRegistry({ policies: [policy] });
+  const authority = new CredentialAuthority({ issuerId: "issuer:ordin", policyRegistry });
+  const credential = authority.issueCredential({
+    id: "credential:alice",
+    principal,
+    capabilities: options.credentialCapabilities ?? ["records:read", "records:export"],
+    allowedActions: options.credentialAllowedActions ?? [
+      "records:delete",
+      "records:export",
+      "records:publish",
+      "records:read",
+    ],
+    allowedResourceIds: options.credentialAllowedResourceIds ?? [
+      "dataset:7",
+      "record:customer-7",
+    ],
+    issuedAt: ISSUED_AT,
+    expiresAt: options.credentialExpiresAt ?? EXPIRES_AT,
+    ...(options.metadata === undefined ? {} : { unverifiedMetadata: options.metadata }),
+  });
+  return { authority, policyRegistry, principal, credential, policy };
 }
 
 function evaluate(
@@ -293,6 +295,7 @@ function createDelegationHarness(input: {
   readonly delegationIssuedAt?: string;
   readonly delegationExpiresAt?: string;
   readonly policy?: Policy;
+  readonly additionalTrustedPolicies?: readonly Policy[];
   readonly delegate?: Principal;
   readonly grantorCapabilities?: readonly string[];
   readonly grantorAllowedActions?: readonly string[];
@@ -301,7 +304,20 @@ function createDelegationHarness(input: {
   readonly delegatedAllowedActions?: readonly string[];
   readonly delegatedAllowedResourceIds?: readonly string[];
 } = {}) {
-  const credentialAuthority = new CredentialAuthority({ issuerId: "issuer:ordin" });
+  const policy = input.policy ?? createPolicy({
+    id: "policy:delegated-reference",
+    rules: [{
+      action: "records:read",
+      actionSensitivity: ActionSensitivity.ROUTINE,
+      requiredCapabilities: ["records:read"],
+      requiredAffiliations: [],
+      effect: "ALLOW",
+    }],
+  });
+  const policyRegistry = new PolicyRegistry({
+    policies: [policy, ...(input.additionalTrustedPolicies ?? [])],
+  });
+  const credentialAuthority = new CredentialAuthority({ issuerId: "issuer:ordin", policyRegistry });
   const grantor = createPrincipal({
     id: "principal:grantor",
     type: PrincipalType.ORGANIZATION,
@@ -330,16 +346,6 @@ function createDelegationHarness(input: {
     issuedAt: ISSUED_AT,
     expiresAt: EXPIRES_AT,
   });
-  const policy = input.policy ?? createPolicy({
-    id: "policy:delegated-reference",
-    rules: [{
-      action: "records:read",
-      actionSensitivity: ActionSensitivity.ROUTINE,
-      requiredCapabilities: ["records:read"],
-      requiredAffiliations: [],
-      effect: "ALLOW",
-    }],
-  });
   const delegationAuthority = new DelegationAuthority({
     issuerId: "delegation-issuer:ordin",
     credentialAuthority,
@@ -358,6 +364,7 @@ function createDelegationHarness(input: {
   });
   return {
     credentialAuthority,
+    policyRegistry,
     grantor,
     delegate,
     grantorCredential,
@@ -924,6 +931,16 @@ test("14 contradictory receipt decision/reason combinations are rejected", () =>
     ),
     DomainValidationError,
   );
+  for (const fabricated of [
+    { ...receiptPayload(decision), action: "records:delete" },
+    { ...receiptPayload(decision), resourceId: "record:forbidden" },
+    { ...receiptPayload(decision), policyId: "policy:untrusted" },
+  ]) {
+    assert.throws(
+      () => signReceipt(fabricated, KEY, harness.authority),
+      DomainValidationError,
+    );
+  }
 });
 
 test("15 non-authorizing DENY and STEP_UP receipts are never consumed", async () => {
@@ -1161,7 +1178,10 @@ test("18d receipt signing caps authority expiry and rejects cross-authority conf
     () => signReceipt(receiptPayload(directDecision), KEY, direct.authority),
     DomainValidationError,
   );
-  const wrongCredentialAuthority = new CredentialAuthority({ issuerId: "issuer:other" });
+  const wrongCredentialAuthority = new CredentialAuthority({
+    issuerId: "issuer:other",
+    policyRegistry: new PolicyRegistry({ policies: [direct.policy] }),
+  });
   assert.throws(
     () => signReceipt(receiptPayload(directDecision, { expiresAt: "2026-06-01T00:14:00.000Z" }), KEY, wrongCredentialAuthority),
     DomainValidationError,
@@ -1373,6 +1393,15 @@ test("20 policy version is content-derived and deterministic", () => {
     ),
   });
   assert.notEqual(changed.version, harness.policy.version);
+  const registry = new PolicyRegistry({ policies: [harness.policy, changed] });
+  assert.deepEqual(registry.resolve(harness.policy.id, harness.policy.version), harness.policy);
+  assert.deepEqual(registry.resolve(changed.id, changed.version), changed);
+  assert.equal("register" in registry, false);
+  assert.equal("remove" in registry, false);
+  assert.throws(
+    () => new PolicyRegistry({ policies: [harness.policy, same] }),
+    DomainValidationError,
+  );
 });
 
 type PublicFixtureOperation = "issueCredential" | "evaluate";
@@ -1516,7 +1545,13 @@ test("21 checked-in versioned public fixtures validate strictly and execute thro
   assert.throws(() => validatePublicFixture(unknown), /unknown fields/);
 
   for (const transcript of fixture.transcripts) {
-    const authority = new CredentialAuthority({ issuerId: `issuer:${transcript.name}` });
+    const registeredPolicies = transcript.steps
+      .filter((step) => step.op === "evaluate")
+      .map((step) => createPolicy(step.input.policy));
+    const authority = new CredentialAuthority({
+      issuerId: `issuer:${transcript.name}`,
+      policyRegistry: new PolicyRegistry({ policies: registeredPolicies }),
+    });
     const credentialIds = [...(transcript.fixed.idsByKind.credential ?? [])];
     const handles = new Map<string, unknown>();
     for (const step of transcript.steps) {
@@ -1599,7 +1634,10 @@ test("23 principal type is exact, required and unknown-field fail-closed", () =>
 });
 
 test("24 credential v2 canonicalizes and independently hashes exact deny-all-capable scope", () => {
-  const authority = new CredentialAuthority({ issuerId: "issuer:scope" });
+  const authority = new CredentialAuthority({
+    issuerId: "issuer:scope",
+    policyRegistry: new PolicyRegistry({ policies: [] }),
+  });
   const principal = createPrincipal({
     id: "principal:scope",
     type: PrincipalType.AGENT,
@@ -1754,6 +1792,7 @@ test("25 delegation issuance binds authority, root identity, policy, attenuated 
   expectCode({ ...base, capabilities: ["records:read", "records:read"] }, "DELEGATION_MALFORMED");
   expectCode({ ...base, issuerId: "caller:forged" }, "DELEGATION_MALFORMED");
   expectCode({ ...base, grantorDelegation: delegation }, "DELEGATION_MALFORMED");
+  expectCode({ ...base, delegate: harness.grantor }, "DELEGATION_IDENTITIES_NOT_DISTINCT");
   expectCode({ ...base, grantorCredential: delegation }, "DELEGATION_GRANTOR_CREDENTIAL_INVALID");
   expectCode({
     ...base,
@@ -1775,7 +1814,10 @@ test("25 delegation issuance binds authority, root identity, policy, attenuated 
     policy: { ...harness.policy, version: `sha256:${"0".repeat(64)}` },
   }, "DELEGATION_POLICY_INVALID");
 
-  const redelegationAuthority = new CredentialAuthority({ issuerId: "issuer:redelegation" });
+  const redelegationAuthority = new CredentialAuthority({
+    issuerId: "issuer:redelegation",
+    policyRegistry: new PolicyRegistry({ policies: [harness.policy] }),
+  });
   const redelegationGrantorCredential = redelegationAuthority.issueCredential({
     id: "credential:redelegation",
     principal: harness.grantor,
@@ -1853,7 +1895,7 @@ test("28 delegated evaluation rejects delegate identity mismatch, inactivity and
     evaluateDelegated(harness, {
       delegateIdentityCredential: harness.grantorCredential,
     }).reasonCode,
-    "DELEGATION_DELEGATE_MISMATCH",
+    "DELEGATION_IDENTITIES_NOT_DISTINCT",
   );
   const wrongType = createPrincipal({
     id: harness.delegate.id,
@@ -1900,7 +1942,10 @@ test("28 delegated evaluation rejects delegate identity mismatch, inactivity and
 
 test("29 delegated evaluation rejects grantor credential substitution and invalidity", () => {
   const harness = createDelegationHarness();
-  const otherAuthority = new CredentialAuthority({ issuerId: "issuer:cross-authority" });
+  const otherAuthority = new CredentialAuthority({
+    issuerId: "issuer:cross-authority",
+    policyRegistry: new PolicyRegistry({ policies: [harness.policy] }),
+  });
   assert.equal(
     evaluateAccess({
       authorityMode: "DELEGATED",
@@ -2017,9 +2062,18 @@ test("31 delegated evaluation enforces validity windows and revocation", () => {
 });
 
 test("32 delegated evaluation pins exact policy content", () => {
-  const harness = createDelegationHarness();
+  const original = createPolicy({
+    id: "policy:delegated-reference",
+    rules: [{
+      action: "records:read",
+      actionSensitivity: ActionSensitivity.ROUTINE,
+      requiredCapabilities: ["records:read"],
+      requiredAffiliations: [],
+      effect: "ALLOW",
+    }],
+  });
   const changed = createPolicy({
-    id: harness.policy.id,
+    id: original.id,
     rules: [{
       action: "records:read",
       actionSensitivity: ActionSensitivity.SENSITIVE,
@@ -2027,6 +2081,10 @@ test("32 delegated evaluation pins exact policy content", () => {
       requiredAffiliations: [],
       effect: "ALLOW",
     }],
+  });
+  const harness = createDelegationHarness({
+    policy: original,
+    additionalTrustedPolicies: [changed],
   });
   assert.equal(
     evaluateDelegated(harness, { policy: changed }).reasonCode,
@@ -2255,6 +2313,31 @@ test("35 step-up approval is human-only and action/resource scoped", async () =>
     approverCredential: valid.credential,
     at: APPROVED_AT,
   })).ok, true);
+});
+
+test("35a step-up request creation rejects fabricated action, resource and policy authority", () => {
+  const harness = createHarness();
+  const decision = evaluate(harness, { action: "records:export", resourceId: "dataset:7" });
+  assert.equal(decision.outcome, "STEP_UP");
+  const service = new HumanStepUpService({
+    credentialAuthority: harness.authority,
+    nonceStore: new InMemoryAtomicNonceStore(),
+  });
+  const attempts = [
+    { ...decision, action: "records:delete" },
+    { ...decision, resourceId: "dataset:forbidden" },
+    { ...decision, policyId: "policy:untrusted" },
+  ];
+  attempts.forEach((fabricated, index) => {
+    assert.throws(
+      () => service.createRequest({
+        id: `step-up:fabricated-${index}`,
+        decision: fabricated,
+        expiresAt: RECEIPT_EXPIRES_AT,
+      }),
+      DomainValidationError,
+    );
+  });
 });
 
 test("36 delegated step-up revalidates acting, grantor and delegation authority at every transition", async () => {

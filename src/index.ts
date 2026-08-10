@@ -35,6 +35,7 @@ export {
 } from "./delegations.js";
 export {
   createPolicy,
+  PolicyRegistry,
   type CreatePolicyInput,
   type PermissionRule,
   type Policy,

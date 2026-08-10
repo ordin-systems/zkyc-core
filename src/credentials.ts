@@ -19,6 +19,7 @@ import {
   type PrincipalType,
   type UnverifiedMetadata,
 } from "./domain.js";
+import { PolicyRegistry, type Policy } from "./policy.js";
 
 export interface AuthorityScope {
   readonly capabilities: readonly string[];
@@ -150,13 +151,30 @@ function validateCredential(value: unknown): Credential {
 
 export class CredentialAuthority {
   readonly issuerId: string;
+  readonly #policyRegistry: PolicyRegistry;
   readonly #issued = new Map<string, Credential>();
   readonly #revocations = new Map<string, Revocation>();
 
-  constructor(input: { issuerId: string }) {
+  constructor(input: { issuerId: string; policyRegistry: PolicyRegistry }) {
     const record = requireRecord(input, "credential authority input");
-    rejectUnknownKeys(record, ["issuerId"], "credential authority input");
+    rejectUnknownKeys(record, ["issuerId", "policyRegistry"], "credential authority input");
     this.issuerId = validateIdentifier(record.issuerId, "issuerId");
+    if (!(record.policyRegistry instanceof PolicyRegistry)) {
+      throw new DomainValidationError("credential authority requires a trusted PolicyRegistry");
+    }
+    this.#policyRegistry = record.policyRegistry;
+  }
+
+  usesPolicyRegistry(value: unknown): boolean {
+    return value === this.#policyRegistry;
+  }
+
+  resolvePolicy(id: unknown, version: unknown): Policy | undefined {
+    return this.#policyRegistry.resolve(id, version);
+  }
+
+  resolveExactPolicy(value: unknown): Policy | undefined {
+    return this.#policyRegistry.resolveExact(value);
   }
 
   issueCredential(input: IssueCredentialInput): Credential {

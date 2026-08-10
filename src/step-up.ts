@@ -20,8 +20,14 @@ import {
   type Principal,
   type PrincipalType as PrincipalTypeValue,
 } from "./domain.js";
-import type { AccessDecision, AuthorityMode } from "./evaluation.js";
+import {
+  revalidateLiveDecisionAuthority,
+  type AccessDecision,
+  type AuthorityMode,
+  type LiveDecisionAuthorityBinding,
+} from "./evaluation.js";
 import type { AtomicNonceStore } from "./nonce.js";
+import type { Policy } from "./policy.js";
 
 export type StepUpStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
 
@@ -196,6 +202,7 @@ export type StepUpAuthorizationUsability =
 
 interface RequestRecord {
   request: StepUpRequest;
+  readonly policy: Policy;
   authorization?: StepUpAuthorization;
 }
 
@@ -542,7 +549,11 @@ export class HumanStepUpService {
     this.#nonceStore = record.nonceStore as AtomicNonceStore;
   }
 
-  createRequest(input: { id: string; decision: AccessDecision; expiresAt: string }): StepUpRequest {
+  createRequest(input: {
+    id: string;
+    decision: AccessDecision;
+    expiresAt: string;
+  }): StepUpRequest {
     const inputRecord = requireRecord(input, "step-up request creation input");
     rejectUnknownKeys(
       inputRecord,
@@ -554,12 +565,16 @@ export class HumanStepUpService {
       throw new DomainValidationError(`step-up request already exists: ${id}`);
     }
     const decision = validateDecision(inputRecord.decision);
+    const policy = this.#credentialAuthority.resolvePolicy(decision.policyId, decision.policyVersion);
+    if (policy === undefined) {
+      throw new DomainValidationError("step-up decision policy is not trusted");
+    }
     const requestedAt = decision.decidedAt;
     const expiresAt = validateTimestamp(inputRecord.expiresAt, "step-up expiresAt");
     if (timestampMillis(expiresAt) <= timestampMillis(requestedAt)) {
       throw new DomainValidationError("step-up expiry must be after request time");
     }
-    const artifacts = this.#activeDecisionArtifacts(decision, requestedAt);
+    const artifacts = this.#activeDecisionArtifacts(decision, policy, requestedAt);
     if (artifacts === undefined) {
       throw new DomainValidationError("step-up decision authority is not currently valid");
     }
@@ -609,7 +624,7 @@ export class HumanStepUpService {
         delegationId: decision.delegationId,
         delegationBindingHash: decision.delegationBindingHash,
       });
-    this.#requests.set(id, { request });
+    this.#requests.set(id, { request, policy });
     return request;
   }
 
@@ -651,6 +666,10 @@ export class HumanStepUpService {
     const record = this.#requests.get(requestId);
     if (record === undefined) return { ok: false, reasonCode: "STEP_UP_NOT_FOUND" };
     const request = record.request;
+    const policy = this.#credentialAuthority.resolvePolicy(request.policyId, request.policyVersion);
+    if (policy === undefined || canonicalJson(policy) !== canonicalJson(record.policy)) {
+      return { ok: false, reasonCode: "SUBJECT_AUTHORITY_INVALID" };
+    }
     if (request.status !== "PENDING") {
       return { ok: false, reasonCode: "STEP_UP_ALREADY_RESOLVED" };
     }
@@ -661,7 +680,7 @@ export class HumanStepUpService {
       record.request = Object.freeze({ ...request, status: "EXPIRED" });
       return { ok: false, reasonCode: "STEP_UP_EXPIRED" };
     }
-    const artifacts = this.#activeRequestArtifacts(request, at);
+    const artifacts = this.#activeRequestArtifacts(request, policy, at);
     if (artifacts === undefined) {
       return { ok: false, reasonCode: "SUBJECT_AUTHORITY_INVALID" };
     }
@@ -793,9 +812,16 @@ export class HumanStepUpService {
         "step-up authorization consumption input",
       );
       const at = validateTimestamp(inputRecord.at, "authorization consumption time");
+      const requestRecord = this.#requests.get(registered.requestId);
+      const policy = this.#credentialAuthority.resolvePolicy(registered.policyId, registered.policyVersion);
+      if (requestRecord === undefined || policy === undefined ||
+        canonicalJson(policy) !== canonicalJson(requestRecord.policy)
+      ) {
+        return false;
+      }
       const expected = this.#validateExpectedBinding(inputRecord, registered.authorityMode);
       if (!this.#matchesExpectedBinding(registered, expected)) return false;
-      if (!this.#inspectRegisteredAuthorization(registered, at).usable) return false;
+      if (!this.#inspectRegisteredAuthorization(registered, policy, at).usable) return false;
       const consumed = await this.#nonceStore.consume(
         `step-up-authorization:${registered.id}`,
         registered.expiresAt,
@@ -828,7 +854,14 @@ export class HumanStepUpService {
         return { usable: false, reasonCode: "STEP_UP_NOT_FOUND" };
       }
       const at = validateTimestamp(inputRecord.at, "authorization inspection time");
-      return this.#inspectRegisteredAuthorization(registered, at);
+      const requestRecord = this.#requests.get(registered.requestId);
+      const policy = this.#credentialAuthority.resolvePolicy(registered.policyId, registered.policyVersion);
+      if (requestRecord === undefined || policy === undefined ||
+        canonicalJson(policy) !== canonicalJson(requestRecord.policy)
+      ) {
+        return { usable: false, reasonCode: "SUBJECT_AUTHORITY_INVALID" };
+      }
+      return this.#inspectRegisteredAuthorization(registered, policy, at);
     } catch {
       return { usable: false, reasonCode: "INVALID_INPUT" };
     }
@@ -836,6 +869,7 @@ export class HumanStepUpService {
 
   #inspectRegisteredAuthorization(
     authorization: StepUpAuthorization,
+    policy: Policy,
     at: string,
   ): StepUpAuthorizationUsability {
     const requestRecord = this.#requests.get(authorization.requestId);
@@ -849,7 +883,7 @@ export class HumanStepUpService {
     if (timestampMillis(at) < timestampMillis(authorization.issuedAt)) {
       return { usable: false, reasonCode: "STEP_UP_NOT_YET_VALID" };
     }
-    if (this.#activeRequestArtifacts(requestRecord.request, at) === undefined) {
+    if (this.#activeRequestArtifacts(requestRecord.request, policy, at) === undefined) {
       return { usable: false, reasonCode: "SUBJECT_AUTHORITY_INVALID" };
     }
     if (authorization.approvedByType !== PrincipalType.HUMAN) {
@@ -902,8 +936,19 @@ export class HumanStepUpService {
 
   #activeDecisionArtifacts(
     decision: AccessDecision,
+    policy: Policy,
     at: string,
   ): ActiveRequestArtifacts | undefined {
+    if (!revalidateLiveDecisionAuthority({
+      binding: decision as LiveDecisionAuthorityBinding,
+      at,
+      credentialAuthority: this.#credentialAuthority,
+      ...(this.#delegationAuthority === undefined
+        ? {}
+        : { delegationAuthority: this.#delegationAuthority }),
+    })) {
+      return undefined;
+    }
     const actingCredential = this.#credentialAuthority.getActiveCredentialById(
       decision.actingCredentialId,
       at,
@@ -954,8 +999,56 @@ export class HumanStepUpService {
 
   #activeRequestArtifacts(
     request: StepUpRequest,
+    policy: Policy,
     at: string,
   ): ActiveRequestArtifacts | undefined {
+    const binding: LiveDecisionAuthorityBinding = request.authorityMode === "DIRECT"
+      ? {
+        authorityMode: "DIRECT",
+        subjectId: request.subjectId,
+        subjectType: request.subjectType,
+        actingCredentialId: request.actingCredentialId,
+        effectiveScopeHash: request.effectiveScopeHash,
+        action: request.action,
+        actionSensitivity: request.actionSensitivity,
+        resourceId: request.resourceId,
+        policyId: request.policyId,
+        policyVersion: request.policyVersion,
+        outcome: "STEP_UP",
+        reasonCode: "HUMAN_APPROVAL_REQUIRED",
+        requiredApproverCapability: request.requiredApproverCapability,
+        ...(request.credentialId === undefined ? {} : { credentialId: request.credentialId }),
+      }
+      : {
+        authorityMode: "DELEGATED",
+        subjectId: request.subjectId,
+        subjectType: request.subjectType,
+        actingCredentialId: request.actingCredentialId,
+        effectiveScopeHash: request.effectiveScopeHash,
+        action: request.action,
+        actionSensitivity: request.actionSensitivity,
+        resourceId: request.resourceId,
+        policyId: request.policyId,
+        policyVersion: request.policyVersion,
+        outcome: "STEP_UP",
+        reasonCode: "HUMAN_APPROVAL_REQUIRED",
+        requiredApproverCapability: request.requiredApproverCapability,
+        grantorId: request.grantorId,
+        grantorType: request.grantorType,
+        grantorCredentialId: request.grantorCredentialId,
+        delegationId: request.delegationId,
+        delegationBindingHash: request.delegationBindingHash,
+      };
+    if (!revalidateLiveDecisionAuthority({
+      binding,
+      at,
+      credentialAuthority: this.#credentialAuthority,
+      ...(this.#delegationAuthority === undefined
+        ? {}
+        : { delegationAuthority: this.#delegationAuthority }),
+    })) {
+      return undefined;
+    }
     const actingCredential = this.#credentialAuthority.getActiveCredentialById(
       request.actingCredentialId,
       at,

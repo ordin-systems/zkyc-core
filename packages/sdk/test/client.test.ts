@@ -44,6 +44,10 @@ function harness() {
       return `${kind}:${next}`;
     },
     receiptHmacKey: HMAC_KEY,
+    trustedPolicies: [
+      policy("ALLOW", "records:read"),
+      policy("STEP_UP", "records:export"),
+    ] as never[],
     issuerId: "issuer:sdk-reference",
   });
   const fetch: FetchLike = (input, init) => {

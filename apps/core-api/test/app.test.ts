@@ -71,6 +71,7 @@ function harness() {
       return `${kind}:${next}`;
     },
     receiptHmacKey: TEST_KEY,
+    trustedPolicies: [policy("ALLOW"), policy("DENY"), policy("STEP_UP")],
     issuerId: "issuer:reference-api-test",
   });
   return {

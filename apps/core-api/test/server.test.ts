@@ -7,6 +7,16 @@ import { startLoopbackReferenceServer } from "../src/server-runtime.js";
 const START = "2026-06-01T00:10:00.000Z";
 const EXPIRY = "2026-06-01T01:00:00.000Z";
 const RESOURCE = "record:server-smoke";
+const SERVER_POLICY = {
+  id: "policy:server-smoke",
+  rules: [{
+    action: "records:read",
+    actionSensitivity: ActionSensitivity.ROUTINE,
+    requiredCapabilities: ["records:read"],
+    requiredAffiliations: [],
+    effect: "ALLOW" as const,
+  }],
+};
 
 async function postJson(baseUrl: string, path: string, body: unknown) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -27,6 +37,7 @@ test("compiled reference listener binds loopback and serves health plus retained
       return `${kind}:server-${next}`;
     },
     receiptHmacKey: new TextEncoder().encode("0123456789abcdef0123456789abcdef"),
+    trustedPolicies: [SERVER_POLICY],
     issuerId: "issuer:server-test",
   });
 
@@ -76,16 +87,7 @@ test("compiled reference listener binds loopback and serves health plus retained
       action: "records:read",
       resourceId: RESOURCE,
       actionContext: { source: "real-http-smoke" },
-      policy: {
-        id: "policy:server-smoke",
-        rules: [{
-          action: "records:read",
-          actionSensitivity: ActionSensitivity.ROUTINE,
-          requiredCapabilities: ["records:read"],
-          requiredAffiliations: [],
-          effect: "ALLOW",
-        }],
-      },
+      policy: SERVER_POLICY,
       issueReceipt: false,
     });
     assert.equal(evaluated.response.status, 200);

@@ -21,7 +21,7 @@ import {
   type Principal,
   type PrincipalType,
 } from "./domain.js";
-import { createPolicy, type Policy } from "./policy.js";
+import { validateExactPolicy, type Policy } from "./policy.js";
 
 export interface CapabilityDelegation extends AuthorityScope {
   readonly version: 1;
@@ -55,6 +55,7 @@ export type DelegationValidationCode =
   | "DELEGATION_ALREADY_EXISTS"
   | "DELEGATION_GRANTOR_CREDENTIAL_INVALID"
   | "DELEGATION_GRANTOR_MISMATCH"
+  | "DELEGATION_IDENTITIES_NOT_DISTINCT"
   | "DELEGATION_SCOPE_ESCALATION"
   | "DELEGATION_POLICY_INVALID"
   | "DELEGATION_TIME_INVALID"
@@ -110,14 +111,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "delegation validation failed";
 }
 
-function validateRegisteredPolicy(value: unknown): Policy {
-  const record = requireRecord(value, "delegation policy");
-  rejectUnknownKeys(record, ["id", "version", "defaultEffect", "rules"], "delegation policy");
-  const policy = createPolicy({ id: record.id, rules: record.rules as never });
-  if (record.version !== policy.version || record.defaultEffect !== policy.defaultEffect) {
+function validateRegisteredPolicy(authority: CredentialAuthority, value: unknown): Policy {
+  const policy = authority.resolveExactPolicy(value);
+  if (policy === undefined) {
     throw new DelegationValidationError(
       "DELEGATION_POLICY_INVALID",
-      "delegation policy must have its content-derived version and default effect",
+      "delegation policy must exactly match a trusted registered policy",
     );
   }
   return policy;
@@ -235,6 +234,12 @@ function validateDelegation(value: unknown): CapabilityDelegation {
       "delegation.delegationBindingHash",
     ),
   });
+  if (
+    candidate.grantorId === candidate.delegateId &&
+    candidate.grantorType === candidate.delegateType
+  ) {
+    throw new DomainValidationError("delegation grantor and delegate identities must be distinct");
+  }
   if (candidate.delegationBindingHash !== computeDelegationBindingHash(candidate)) {
     throw new DomainValidationError(
       "delegation.delegationBindingHash does not match immutable delegation fields",
@@ -303,7 +308,13 @@ export class DelegationAuthority {
       }
       const grantor = createPrincipal(record.grantor);
       const delegate = createPrincipal(record.delegate);
-      const policy = validateRegisteredPolicy(record.policy);
+      if (grantor.id === delegate.id && grantor.type === delegate.type) {
+        throw new DelegationValidationError(
+          "DELEGATION_IDENTITIES_NOT_DISTINCT",
+          "delegation grantor and delegate identities must be distinct",
+        );
+      }
+      const policy = validateRegisteredPolicy(this.#credentialAuthority, record.policy);
       const issuedAt = validateTimestamp(record.issuedAt, "delegation.issuedAt");
       const expiresAt = validateTimestamp(record.expiresAt, "delegation.expiresAt");
       if (timestampMillis(issuedAt) >= timestampMillis(expiresAt)) {
@@ -431,7 +442,7 @@ export class DelegationAuthority {
     if (expectedPolicy !== undefined) {
       let policy: Policy;
       try {
-        policy = validateRegisteredPolicy(expectedPolicy);
+        policy = validateRegisteredPolicy(this.#credentialAuthority, expectedPolicy);
       } catch {
         return Object.freeze({ valid: false, code: "DELEGATION_POLICY_MISMATCH" });
       }

@@ -5,6 +5,7 @@ import {
   DomainValidationError,
   HumanStepUpService,
   InMemoryAtomicNonceStore,
+  PolicyRegistry,
   createPolicy,
   createPrincipal,
   evaluateAccess,
@@ -15,6 +16,7 @@ import {
   type AuthorityMode,
   type CapabilityDelegation,
   type Credential,
+  type CreatePolicyInput,
   type Policy,
   type Principal,
   type ReceiptExpectedBinding,
@@ -37,6 +39,7 @@ export interface ReferenceAppOptions {
   readonly clock: () => string;
   readonly idFactory: (kind: ReferenceIdKind) => string;
   readonly receiptHmacKey: Uint8Array;
+  readonly trustedPolicies: readonly CreatePolicyInput[];
   readonly issuerId?: string;
 }
 
@@ -463,7 +466,13 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
 
   const receiptHmacKey = new Uint8Array(options.receiptHmacKey);
   const issuerId = options.issuerId ?? "issuer:reference-api";
-  const credentialAuthority = new CredentialAuthority({ issuerId });
+  if (!Array.isArray(options.trustedPolicies)) {
+    throw new DomainValidationError("trustedPolicies must be configured before app startup");
+  }
+  const policyRegistry = new PolicyRegistry({
+    policies: options.trustedPolicies.map((policy) => createPolicy(policy)),
+  });
+  const credentialAuthority = new CredentialAuthority({ issuerId, policyRegistry });
   const delegationAuthority = new DelegationAuthority({ issuerId, credentialAuthority });
   const nonceStore = new InMemoryAtomicNonceStore();
   const stepUpService = new HumanStepUpService({

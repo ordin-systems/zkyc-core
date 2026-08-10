@@ -21,8 +21,13 @@ import {
   type PrincipalType,
   type ReasonCode,
 } from "./domain.js";
-import type { AuthorityMode } from "./evaluation.js";
+import {
+  revalidateLiveDecisionAuthority,
+  type AuthorityMode,
+  type LiveDecisionAuthorityBinding,
+} from "./evaluation.js";
 import type { AtomicNonceStore } from "./nonce.js";
+
 
 interface CommonReceiptPayload {
   readonly version: 2;
@@ -538,6 +543,43 @@ function inspectAuthority(
   at: string,
 ): ReceiptVerificationCode | undefined {
   if (!(credentialAuthority instanceof CredentialAuthority)) {
+    return authorityFailureCode(payload);
+  }
+  if (credentialAuthority.resolvePolicy(payload.policyId, payload.policyVersion) === undefined) {
+    return "RECEIPT_AUTHORITY_INVALID";
+  }
+  const liveBinding: LiveDecisionAuthorityBinding = {
+    authorityMode: payload.authorityMode,
+    subjectId: payload.subjectId,
+    subjectType: payload.subjectType,
+    actingCredentialId: payload.actingCredentialId,
+    effectiveScopeHash: payload.effectiveScopeHash,
+    action: payload.action,
+    actionSensitivity: payload.actionSensitivity,
+    resourceId: payload.resourceId,
+    policyId: payload.policyId,
+    policyVersion: payload.policyVersion,
+    outcome: payload.decision,
+    reasonCode: payload.reasonCode,
+    ...(payload.requiredApproverCapability === undefined
+      ? {}
+      : { requiredApproverCapability: payload.requiredApproverCapability }),
+    ...(payload.authorityMode === "DIRECT"
+      ? (payload.credentialId === undefined ? {} : { credentialId: payload.credentialId })
+      : {
+        grantorId: payload.grantorId,
+        grantorType: payload.grantorType,
+        grantorCredentialId: payload.grantorCredentialId,
+        delegationId: payload.delegationId,
+        delegationBindingHash: payload.delegationBindingHash,
+      }),
+  };
+  if (!revalidateLiveDecisionAuthority({
+    binding: liveBinding,
+    at,
+    credentialAuthority,
+    ...(delegationAuthority instanceof DelegationAuthority ? { delegationAuthority } : {}),
+  })) {
     return authorityFailureCode(payload);
   }
   const acting = credentialAuthority.getActiveCredentialById(

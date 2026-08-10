@@ -435,6 +435,13 @@ function assertExpected(step: TranscriptStep, actual: { readonly status: number;
 async function executeTranscript(transcript: LifecycleTranscript): Promise<readonly Operation[]> {
   let now = transcript.fixed.initialClock;
   const queues = new Map(ID_KINDS.map((kind) => [kind, [...transcript.fixed.idsByKind[kind]]]));
+  const trustedPolicies = [...new Map(
+    transcript.steps.flatMap((step) =>
+      step.input.policy === undefined
+        ? []
+        : [[JSON.stringify(step.input.policy), step.input.policy] as const]
+    ),
+  ).values()];
   const app = createReferenceApp({
     clock: () => now,
     idFactory: (kind) => {
@@ -443,6 +450,7 @@ async function executeTranscript(transcript: LifecycleTranscript): Promise<reado
       return next;
     },
     receiptHmacKey: Uint8Array.from(transcript.fixed.referenceKeyBytes),
+    trustedPolicies: trustedPolicies as never[],
     issuerId: `issuer:fixture:${transcript.name}`,
   });
   const handles = new Map<string, unknown>();

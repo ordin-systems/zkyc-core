@@ -16,7 +16,7 @@ import {
   type ReasonCode,
   type UnverifiedMetadata,
 } from "./domain.js";
-import { createPolicy, type Policy } from "./policy.js";
+import type { Policy } from "./policy.js";
 
 export const AUTHORITY_MODES = ["DIRECT", "DELEGATED"] as const;
 export type AuthorityMode = (typeof AUTHORITY_MODES)[number];
@@ -142,16 +142,6 @@ function invalidDecision(at?: unknown, authorityMode?: AuthorityMode): AccessDec
   });
 }
 
-function validateExactPolicy(value: unknown): Policy {
-  const record = requireRecord(value, "evaluation policy");
-  rejectUnknownKeys(record, ["id", "version", "rules", "defaultEffect"], "evaluation policy");
-  const policy = createPolicy({ id: record.id, rules: record.rules as never });
-  if (record.version !== policy.version || record.defaultEffect !== "DENY") {
-    throw new Error("evaluation policy must have its exact content-derived version");
-  }
-  return policy;
-}
-
 function validateCommon(
   record: Record<string, unknown>,
   authorityMode: AuthorityMode,
@@ -160,10 +150,13 @@ function validateCommon(
   const action = validateAction(record.action, "action");
   const resourceId = validateIdentifier(record.resourceId, "resourceId");
   const contextHash = sha256Version(requireRecord(record.actionContext, "actionContext"));
-  const policy = validateExactPolicy(record.policy);
   const at = validateTimestamp(record.at, "decision time");
   if (!(record.credentialAuthority instanceof CredentialAuthority)) {
     throw new Error("evaluation requires a credential authority");
+  }
+  const policy = record.credentialAuthority.resolveExactPolicy(record.policy);
+  if (policy === undefined) {
+    throw new Error("evaluation policy is not trusted by the configured authority");
   }
   return {
     authorityMode,
@@ -377,6 +370,20 @@ function evaluateDelegated(
     return decision(common, "DENY", mappedCredentialReason(delegateStatus.code), bindings);
   }
   const actingBindings = delegatedBindings(delegateIdentityCredential);
+  if (
+    typeof record.grantorCredential === "object" &&
+    record.grantorCredential !== null &&
+    !Array.isArray(record.grantorCredential) &&
+    (record.grantorCredential as Credential).id === delegateIdentityCredential.id
+  ) {
+    return decision(
+      common,
+      "DENY",
+      "DELEGATION_IDENTITIES_NOT_DISTINCT",
+      actingBindings,
+      delegateIdentityCredential.unverifiedMetadata,
+    );
+  }
   if (!exactSubjectMatch(common.principal, delegateIdentityCredential)) {
     return decision(
       common,
@@ -412,6 +419,18 @@ function evaluateDelegated(
       common,
       "DENY",
       mapped ?? "DELEGATION_MALFORMED",
+      bindings,
+      delegateIdentityCredential.unverifiedMetadata,
+    );
+  }
+  if (
+    delegation.grantorId === delegation.delegateId &&
+    delegation.grantorType === delegation.delegateType
+  ) {
+    return decision(
+      common,
+      "DENY",
+      "DELEGATION_IDENTITIES_NOT_DISTINCT",
       bindings,
       delegateIdentityCredential.unverifiedMetadata,
     );
@@ -496,6 +515,188 @@ function evaluateDelegated(
     delegateIdentityCredential.unverifiedMetadata,
     "INSUFFICIENT_DELEGATED_CAPABILITY",
   );
+}
+
+export interface LiveDecisionAuthorityBinding {
+  readonly authorityMode: AuthorityMode;
+  readonly subjectId: string;
+  readonly subjectType: PrincipalType;
+  readonly actingCredentialId: string;
+  readonly effectiveScopeHash: string;
+  readonly action: string;
+  readonly actionSensitivity: ActionSensitivity;
+  readonly resourceId: string;
+  readonly policyId: string;
+  readonly policyVersion: string;
+  readonly outcome: DecisionOutcome;
+  readonly reasonCode: ReasonCode;
+  readonly requiredApproverCapability?: string;
+  readonly credentialId?: string;
+  readonly grantorId?: string;
+  readonly grantorType?: PrincipalType;
+  readonly grantorCredentialId?: string;
+  readonly delegationId?: string;
+  readonly delegationBindingHash?: string;
+}
+
+interface ExpectedPolicyDecision {
+  readonly outcome: DecisionOutcome;
+  readonly reasonCode: ReasonCode;
+  readonly requiredApproverCapability?: string;
+}
+
+function policyDecisionForAuthority(
+  binding: LiveDecisionAuthorityBinding,
+  policy: Policy,
+  capabilities: readonly string[],
+  affiliations: Credential["affiliations"],
+  insufficientCapabilityReason: ReasonCode,
+): ExpectedPolicyDecision {
+  const rule = policy.rules.find((candidate) => candidate.action === binding.action);
+  if (rule === undefined) return { outcome: "DENY", reasonCode: "ACTION_NOT_PERMITTED" };
+  if (rule.actionSensitivity !== binding.actionSensitivity) {
+    return { outcome: "DENY", reasonCode: "INVALID_INPUT" };
+  }
+  if (rule.effect === "DENY") return { outcome: "DENY", reasonCode: "POLICY_DENY" };
+  const granted = new Set(capabilities);
+  if (!rule.requiredCapabilities.every((capability) => granted.has(capability))) {
+    return { outcome: "DENY", reasonCode: insufficientCapabilityReason };
+  }
+  const affiliationKeys = new Set(
+    affiliations.map((affiliation) => `${affiliation.organizationId}\u0000${affiliation.role}`),
+  );
+  if (
+    !rule.requiredAffiliations.every((affiliation) =>
+      affiliationKeys.has(`${affiliation.organizationId}\u0000${affiliation.role}`)
+    )
+  ) {
+    return { outcome: "DENY", reasonCode: "AFFILIATION_REQUIRED" };
+  }
+  if (rule.effect === "ALLOW") return { outcome: "ALLOW", reasonCode: "POLICY_ALLOW" };
+  return {
+    outcome: "STEP_UP",
+    reasonCode: "HUMAN_APPROVAL_REQUIRED",
+    requiredApproverCapability: rule.approverCapability as string,
+  };
+}
+
+function matchesExpectedPolicyDecision(
+  binding: LiveDecisionAuthorityBinding,
+  expected: ExpectedPolicyDecision,
+): boolean {
+  return binding.outcome === expected.outcome &&
+    binding.reasonCode === expected.reasonCode &&
+    binding.requiredApproverCapability === expected.requiredApproverCapability;
+}
+
+/** Revalidates a decision-shaped binding against current exact policy and retained authority. */
+export function revalidateLiveDecisionAuthority(input: {
+  readonly binding: LiveDecisionAuthorityBinding;
+  readonly at: string;
+  readonly credentialAuthority: CredentialAuthority;
+  readonly delegationAuthority?: DelegationAuthority;
+}): boolean {
+  try {
+    const binding = input.binding;
+    const policy = input.credentialAuthority.resolvePolicy(binding.policyId, binding.policyVersion);
+    if (policy === undefined) return false;
+    const acting = input.credentialAuthority.getActiveCredentialById(
+      binding.actingCredentialId,
+      input.at,
+      binding.subjectId,
+      binding.subjectType,
+    );
+    if (acting === undefined) return false;
+    if (binding.authorityMode === "DIRECT") {
+      if (
+        binding.credentialId !== undefined && binding.credentialId !== acting.id ||
+        binding.effectiveScopeHash !== acting.scopeHash ||
+        !acting.allowedActions.includes(binding.action) ||
+        !acting.allowedResourceIds.includes(binding.resourceId) ||
+        binding.grantorId !== undefined ||
+        binding.grantorType !== undefined ||
+        binding.grantorCredentialId !== undefined ||
+        binding.delegationId !== undefined ||
+        binding.delegationBindingHash !== undefined
+      ) {
+        return false;
+      }
+      return matchesExpectedPolicyDecision(
+        binding,
+        policyDecisionForAuthority(
+          binding,
+          policy,
+          acting.capabilities,
+          acting.affiliations,
+          "INSUFFICIENT_CAPABILITY",
+        ),
+      );
+    }
+    if (
+      binding.credentialId !== undefined ||
+      binding.grantorId === undefined ||
+      binding.grantorType === undefined ||
+      binding.grantorCredentialId === undefined ||
+      binding.delegationId === undefined ||
+      binding.delegationBindingHash === undefined ||
+      binding.actingCredentialId === binding.grantorCredentialId ||
+      (binding.subjectId === binding.grantorId && binding.subjectType === binding.grantorType) ||
+      !(input.delegationAuthority instanceof DelegationAuthority) ||
+      !input.delegationAuthority.usesCredentialAuthority(input.credentialAuthority)
+    ) {
+      return false;
+    }
+    const delegationStatus = input.delegationAuthority.checkDelegationById(
+      binding.delegationId,
+      input.at,
+      policy,
+    );
+    if (!delegationStatus.valid) return false;
+    const delegation = input.delegationAuthority.getActiveDelegationById(
+      binding.delegationId,
+      input.at,
+    );
+    const grantor = input.credentialAuthority.getActiveCredentialById(
+      binding.grantorCredentialId,
+      input.at,
+      binding.grantorId,
+      binding.grantorType,
+    );
+    if (
+      delegation === undefined ||
+      grantor === undefined ||
+      delegation.delegateId !== binding.subjectId ||
+      delegation.delegateType !== binding.subjectType ||
+      delegation.grantorId !== binding.grantorId ||
+      delegation.grantorType !== binding.grantorType ||
+      delegation.grantorCredentialId !== binding.grantorCredentialId ||
+      delegation.grantorCredentialId === acting.id ||
+      (delegation.grantorId === delegation.delegateId &&
+        delegation.grantorType === delegation.delegateType) ||
+      delegation.scopeHash !== binding.effectiveScopeHash ||
+      delegation.delegationBindingHash !== binding.delegationBindingHash ||
+      delegation.policyId !== policy.id ||
+      delegation.policyVersion !== policy.version ||
+      !grantor.allowedActions.includes(binding.action) ||
+      !grantor.allowedResourceIds.includes(binding.resourceId) ||
+      !delegation.allowedActions.includes(binding.action) ||
+      !delegation.allowedResourceIds.includes(binding.resourceId)
+    ) {
+      return false;
+    }
+    return matchesExpectedPolicyDecision(
+      binding,
+      policyDecisionForAuthority(
+        binding,
+        policy,
+        delegation.capabilities,
+        acting.affiliations,
+        "INSUFFICIENT_DELEGATED_CAPABILITY",
+      ),
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function evaluateAccess(value: unknown): AccessDecision {
