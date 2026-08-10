@@ -1361,58 +1361,197 @@ test("20 policy version is content-derived and deterministic", () => {
   assert.notEqual(changed.version, harness.policy.version);
 });
 
-interface FixtureCase {
-  readonly name: string;
-  readonly principal: unknown;
-  readonly credential: {
-    readonly id: string;
-    readonly capabilities: readonly string[];
-    readonly allowedActions: readonly string[];
-    readonly allowedResourceIds: readonly string[];
-    readonly issuedAt: string;
-    readonly expiresAt: string;
-    readonly unverifiedMetadata?: { readonly zkPassProofId?: string };
-  };
-  readonly action: string;
-  readonly resourceId: string;
-  readonly actionContext: Readonly<Record<string, unknown>>;
-  readonly policy: unknown;
+type PublicFixtureOperation = "issueCredential" | "evaluate";
+interface PublicFixtureStep {
+  readonly op: PublicFixtureOperation;
   readonly at: string;
-  readonly expected: { readonly outcome: string; readonly reasonCode: string };
+  readonly as: string;
+  readonly input: Readonly<Record<string, unknown>>;
+  readonly expect: Readonly<Record<string, unknown>> & { readonly status: number };
+}
+interface PublicFixtureTranscript {
+  readonly name: string;
+  readonly fixed: {
+    readonly initialClock: string;
+    readonly referenceKeyBytes: readonly number[];
+    readonly idsByKind: Readonly<Record<string, readonly string[]>>;
+  };
+  readonly steps: readonly PublicFixtureStep[];
+}
+interface PublicFixtureDocument {
+  readonly version: 1;
+  readonly transcripts: readonly PublicFixtureTranscript[];
 }
 
-test("21 checked-in fixtures execute through the public API", async () => {
+function fixtureRecord(value: unknown, label: string): Record<string, unknown> {
+  assert.equal(typeof value, "object", `${label} must be an object`);
+  assert.notEqual(value, null, `${label} must be an object`);
+  assert.equal(Array.isArray(value), false, `${label} must be an object`);
+  const prototype = Object.getPrototypeOf(value);
+  assert.ok(prototype === Object.prototype || prototype === null, `${label} must be plain`);
+  return value as Record<string, unknown>;
+}
+
+function fixtureExact(
+  value: unknown,
+  required: readonly string[],
+  optional: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  const output = fixtureRecord(value, label);
+  const allowed = new Set([...required, ...optional]);
+  assert.deepEqual(Object.keys(output).filter((key) => !allowed.has(key)), [], `${label} has unknown fields`);
+  required.forEach((key) => assert.ok(Object.hasOwn(output, key), `${label}.${key} is required`));
+  return output;
+}
+
+function fixtureTimestamp(value: unknown, label: string): string {
+  assert.equal(typeof value, "string", `${label} must be a string`);
+  assert.equal(new Date(value as string).toISOString(), value, `${label} must be canonical`);
+  return value as string;
+}
+
+function fixtureStrings(value: unknown, label: string): readonly string[] {
+  assert.ok(Array.isArray(value), `${label} must be an array`);
+  value.forEach((entry, index) => assert.equal(typeof entry, "string", `${label}[${index}] must be a string`));
+  return value as readonly string[];
+}
+
+function validatePublicFixture(value: unknown): PublicFixtureDocument {
+  const root = fixtureExact(value, ["version", "transcripts"], [], "fixture");
+  assert.equal(root.version, 1);
+  assert.ok(Array.isArray(root.transcripts) && root.transcripts.length > 0);
+  const names = new Set<string>();
+  (root.transcripts as unknown[]).forEach((entry, transcriptIndex) => {
+    const transcript = fixtureExact(entry, ["name", "fixed", "steps"], [], `transcripts[${transcriptIndex}]`);
+    assert.equal(typeof transcript.name, "string");
+    assert.equal(names.has(transcript.name as string), false);
+    names.add(transcript.name as string);
+    const fixed = fixtureExact(
+      transcript.fixed,
+      ["initialClock", "referenceKeyBytes", "idsByKind"],
+      [],
+      `${transcript.name}.fixed`,
+    );
+    fixtureTimestamp(fixed.initialClock, `${transcript.name}.fixed.initialClock`);
+    assert.ok(Array.isArray(fixed.referenceKeyBytes) && fixed.referenceKeyBytes.length === 32);
+    fixed.referenceKeyBytes.forEach((byte) => assert.ok(Number.isInteger(byte) && (byte as number) >= 0 && (byte as number) <= 255));
+    const ids = fixtureExact(
+      fixed.idsByKind,
+      ["credential", "delegation", "decision-log", "step-up-request", "receipt-nonce"],
+      [],
+      `${transcript.name}.fixed.idsByKind`,
+    );
+    Object.entries(ids).forEach(([kind, list]) => fixtureStrings(list, `${transcript.name}.fixed.idsByKind.${kind}`));
+    assert.ok(Array.isArray(transcript.steps) && transcript.steps.length > 0);
+    const handles = new Set<string>();
+    transcript.steps.forEach((stepValue, stepIndex) => {
+      const label = `${transcript.name}.steps[${stepIndex}]`;
+      const step = fixtureExact(stepValue, ["op", "at", "as", "input", "expect"], [], label);
+      assert.ok(step.op === "issueCredential" || step.op === "evaluate");
+      fixtureTimestamp(step.at, `${label}.at`);
+      assert.match(step.as as string, /^[a-z][a-z0-9-]*$/);
+      assert.equal(handles.has(step.as as string), false);
+      handles.add(step.as as string);
+      if (step.op === "issueCredential") {
+        const input = fixtureExact(
+          step.input,
+          ["principal", "capabilities", "allowedActions", "allowedResourceIds", "expiresAt"],
+          ["unverifiedMetadata"],
+          `${label}.input`,
+        );
+        createPrincipal(input.principal);
+        fixtureStrings(input.capabilities, `${label}.input.capabilities`);
+        fixtureStrings(input.allowedActions, `${label}.input.allowedActions`);
+        fixtureStrings(input.allowedResourceIds, `${label}.input.allowedResourceIds`);
+        fixtureTimestamp(input.expiresAt, `${label}.input.expiresAt`);
+        const expectation = fixtureExact(step.expect, ["status"], [], `${label}.expect`);
+        assert.equal(expectation.status, 201);
+      } else {
+        const input = fixtureExact(
+          step.input,
+          ["authorityMode", "credential", "action", "resourceId", "actionContext", "policy", "issueReceipt"],
+          ["receiptExpiresAt"],
+          `${label}.input`,
+        );
+        assert.equal(input.authorityMode, "DIRECT");
+        assert.match(input.credential as string, /^\$[a-z][a-z0-9-]*$/);
+        assert.equal(typeof input.action, "string");
+        assert.equal(typeof input.resourceId, "string");
+        fixtureRecord(input.actionContext, `${label}.input.actionContext`);
+        createPolicy(input.policy);
+        assert.equal(typeof input.issueReceipt, "boolean");
+        const expectation = fixtureExact(
+          step.expect,
+          ["status", "outcome", "reasonCode"],
+          [],
+          `${label}.expect`,
+        );
+        assert.equal(expectation.status, 200);
+      }
+    });
+  });
+  return value as PublicFixtureDocument;
+}
+
+test("21 checked-in versioned public fixtures validate strictly and execute through core contracts", async () => {
   const url = new URL("../../fixtures/public-api-cases.json", import.meta.url);
-  const fixtures = JSON.parse(await readFile(url, "utf8")) as FixtureCase[];
-  for (const fixture of fixtures) {
-    const authority = new CredentialAuthority({ issuerId: `issuer:${fixture.name}` });
-    const principal = createPrincipal(fixture.principal);
-    const credential = authority.issueCredential({
-      id: fixture.credential.id,
-      principal,
-      capabilities: fixture.credential.capabilities,
-      allowedActions: fixture.credential.allowedActions,
-      allowedResourceIds: fixture.credential.allowedResourceIds,
-      issuedAt: fixture.credential.issuedAt,
-      expiresAt: fixture.credential.expiresAt,
-      ...(fixture.credential.unverifiedMetadata === undefined
-        ? {}
-        : { unverifiedMetadata: fixture.credential.unverifiedMetadata }),
-    });
-    const policy = createPolicy(fixture.policy);
-    const decision = evaluateAccess({
-      authorityMode: "DIRECT",
-      principal,
-      credential,
-      action: fixture.action,
-      resourceId: fixture.resourceId,
-      actionContext: fixture.actionContext,
-      policy,
-      at: fixture.at,
-      credentialAuthority: authority,
-    });
-    assert.equal(decision.outcome, fixture.expected.outcome, fixture.name);
-    assert.equal(decision.reasonCode, fixture.expected.reasonCode, fixture.name);
+  const fixture = validatePublicFixture(JSON.parse(await readFile(url, "utf8")));
+  const unknown = structuredClone(fixture) as unknown as Record<string, unknown>;
+  (unknown.transcripts as Record<string, unknown>[])[0]!.unexpected = true;
+  assert.throws(() => validatePublicFixture(unknown), /unknown fields/);
+
+  for (const transcript of fixture.transcripts) {
+    const authority = new CredentialAuthority({ issuerId: `issuer:${transcript.name}` });
+    const credentialIds = [...(transcript.fixed.idsByKind.credential ?? [])];
+    const handles = new Map<string, unknown>();
+    for (const step of transcript.steps) {
+      if (step.op === "issueCredential") {
+        const input = step.input;
+        const principal = createPrincipal(input.principal);
+        const id = credentialIds.shift();
+        assert.ok(id, `${transcript.name} exhausted credential IDs`);
+        const credential = authority.issueCredential({
+          id,
+          principal,
+          capabilities: input.capabilities as readonly string[],
+          allowedActions: input.allowedActions as readonly string[],
+          allowedResourceIds: input.allowedResourceIds as readonly string[],
+          issuedAt: step.at,
+          expiresAt: input.expiresAt as string,
+          ...(input.unverifiedMetadata === undefined
+            ? {}
+            : { unverifiedMetadata: input.unverifiedMetadata as never }),
+        });
+        handles.set(step.as, credential);
+        assert.equal(step.expect.status, 201);
+      } else {
+        const input = step.input;
+        const reference = input.credential as string;
+        const credential = handles.get(reference.slice(1)) as Credential | undefined;
+        assert.ok(credential, `${transcript.name} did not resolve ${reference}`);
+        const principal = createPrincipal({
+          id: credential.principalId,
+          type: credential.principalType,
+          affiliations: credential.affiliations,
+        });
+        const decision = evaluateAccess({
+          authorityMode: "DIRECT",
+          principal,
+          credential,
+          action: input.action,
+          resourceId: input.resourceId,
+          actionContext: input.actionContext,
+          policy: createPolicy(input.policy),
+          at: step.at,
+          credentialAuthority: authority,
+        });
+        assert.equal(decision.outcome, step.expect.outcome, transcript.name);
+        assert.equal(decision.reasonCode, step.expect.reasonCode, transcript.name);
+        handles.set(step.as, decision);
+      }
+    }
+    assert.deepEqual(credentialIds, [], `${transcript.name} left unused credential IDs`);
   }
 });
 
