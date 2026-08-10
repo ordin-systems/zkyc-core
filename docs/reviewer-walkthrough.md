@@ -25,7 +25,7 @@ If Playwright Chromium is absent, run `npx --no-install playwright install chrom
 
 ## 2. Confirm behavioral counts
 
-Expected at executable baseline `780fe8704f591f6064940d601b095aa13371d96a`:
+Expected at executable baseline `20fa75cf847e064e84f07f6426908412a5811be6`:
 
 - core 46;
 - API/server 13;

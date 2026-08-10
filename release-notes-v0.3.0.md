@@ -2,7 +2,7 @@
 
 **Stage:** integrated local reference candidate; unreleased.
 
-**Executable baseline:** `780fe8704f591f6064940d601b095aa13371d96a`.
+**Executable baseline:** `20fa75cf847e064e84f07f6426908412a5811be6`.
 
 These notes describe candidate behavior. They are not evidence of a merge, tag, GitHub release, publication, immutable setting, CI result for this head, independent approval, archive digest, logged-out readback, or npm package.
 
@@ -13,6 +13,7 @@ These notes describe candidate behavior. They are not evidence of a merge, tag, 
 - explicit direct and one-hop delegated authority modes;
 - separate acting-subject identity credential and grantor credential;
 - exact credential-bound grantor identity and affiliation matching at delegation issuance;
+- stable delegation validation codes preserved through Hono and surfaced by the SDK;
 - no grantor-affiliation transfer to the delegate;
 - delegation attenuation across capabilities, actions, and resources, with redelegation authority excluded;
 - policy ID/version pinning and expiry/revocation revalidation;
@@ -41,7 +42,7 @@ Typecheck, build, format, security, package, and dependency-audit gates are sepa
 
 ## Independent review state
 
-The defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES`. Its two findings were remediated. The parallel specification review timed out without a verdict after reproducing additional forged SDK derived-hash and policy-semantic acceptance; those paths were also remediated. At superseded candidate `5749f77495bb075871fed0e80eff3ca89e2f9d9f`, the defensive reviewer returned `PASS`, while the specification reviewer returned `REQUEST_CHANGES` after proving an unsatisfied-capability forged `ALLOW`. At superseded candidate `db759f18ff727e59e70f472b193d88cd404e61fe`, both reviewers returned `REQUEST_CHANGES` after proving grantor-scope escalation, and the specification reviewer additionally proved direct affiliation substitution. At superseded candidate `ab67604a67263af316a5dd78643435e3045809fb`, the defensive reviewer returned `PASS`, while the specification reviewer found core delegation issuance still accepted substituted grantor affiliations. The executable baseline above closes all reproduced findings by enforcing exact credential-bound grantor identity/affiliations in core, API, and SDK while retaining delegation attenuation invariants. This successor has not yet received new exact-head independent `PASS` verdicts.
+The defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES`. Its two findings were remediated. The parallel specification review timed out without a verdict after reproducing additional forged SDK derived-hash and policy-semantic acceptance; those paths were also remediated. At superseded candidate `5749f77495bb075871fed0e80eff3ca89e2f9d9f`, the defensive reviewer returned `PASS`, while the specification reviewer returned `REQUEST_CHANGES` after proving an unsatisfied-capability forged `ALLOW`. At superseded candidate `db759f18ff727e59e70f472b193d88cd404e61fe`, both reviewers returned `REQUEST_CHANGES` after proving grantor-scope escalation, and the specification reviewer additionally proved direct affiliation substitution. At superseded candidate `ab67604a67263af316a5dd78643435e3045809fb`, the defensive reviewer returned `PASS`, while the specification reviewer found core delegation issuance still accepted substituted grantor affiliations. At superseded candidate `7816c406a57eb17a85f3f275b4173550c1e725dc`, the defensive reviewer returned `PASS`, while the specification reviewer found that Hono erased the correct core mismatch code. The executable baseline above closes all reproduced findings by enforcing exact credential-bound grantor identity/affiliations in core, API, and SDK, retaining delegation attenuation, and preserving stable delegation codes through transport. This successor has not yet received new exact-head independent `PASS` verdicts.
 
 ## Compatibility and state
 

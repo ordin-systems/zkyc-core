@@ -22,7 +22,7 @@
 
 | Reviewer-facing claim | Implementation artifact | Executable evidence |
 |---|---|---|
-| Strict Hono issuance/evaluation/delegation/consumption routes | `apps/core-api/src/app.ts` | 13 API/server tests |
+| Strict Hono issuance/evaluation/delegation/consumption routes with stable delegation domain codes | `apps/core-api/src/app.ts` | 13 API/server tests, including exact grantor-mismatch code preservation |
 | Receipts only from same-request `ALLOW`; step-up only from retained decision | `apps/core-api/src/app.ts` | API provenance and injection tests |
 | Retained current-state zkYA onboarding views | `apps/core-api/src/app.ts` | API onboarding lifecycle tests; SDK/UI/Chromium paths |
 | Strict runtime-validated, request-correlated browser SDK | `packages/sdk/src/index.ts`, `packages/sdk/src/validation.ts`, `packages/sdk/src/integrity.ts` | 12 SDK tests, including credentialless denial and forged typed-subject affiliation/scope/context/policy/capability/grantor-attenuation/outcome/delegation/receipt/step-up response rejection |

@@ -2,7 +2,7 @@
 
 **Deterministic Agent Identity and Action-Authority Reference Stack**
 
-> **Status:** integrated local `v0.3.0` reference candidate. The executable baseline is commit `780fe8704f591f6064940d601b095aa13371d96a`; this documentation-only successor does not change its runtime. This candidate has not been pushed, merged, tagged, released, published, or independently approved.
+> **Status:** integrated local `v0.3.0` reference candidate. The executable baseline is commit `20fa75cf847e064e84f07f6426908412a5811be6`; this documentation-only successor does not change its runtime. This candidate has not been pushed, merged, tagged, released, published, or independently approved.
 
 zKYC Core evaluates typed principals and direct or delegated authority against exact credential, action, resource, and versioned-policy scope. It returns reason-coded `ALLOW`, `DENY`, or `STEP_UP` decisions and supports one-time, authority-bound consumption.
 
