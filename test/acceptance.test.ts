@@ -28,6 +28,8 @@ import {
   type Principal,
   type ReceiptExpectedBinding,
   type ReceiptPayload,
+  type StepUpAuthorization,
+  type StepUpAuthorizationBinding,
 } from "../src/index.js";
 
 const ISSUED_AT = "2026-06-01T00:00:00.000Z";
@@ -176,22 +178,74 @@ function expectedReceiptBinding(decision: AccessDecision) {
   };
 }
 
-function createApprover(authority: CredentialAuthority, capabilities = ["approval:records-export"]) {
+function createApprover(
+  authority: CredentialAuthority,
+  capabilities = ["approval:records-export"],
+  input: {
+    readonly id?: string;
+    readonly type?: PrincipalType;
+    readonly allowedActions?: readonly string[];
+    readonly allowedResourceIds?: readonly string[];
+    readonly expiresAt?: string;
+  } = {},
+) {
+  const id = input.id ?? "bob";
   const principal = createPrincipal({
-    id: "principal:bob",
-    type: PrincipalType.HUMAN,
+    id: `principal:${id}`,
+    type: input.type ?? PrincipalType.HUMAN,
     affiliations: [REVIEWER_AFFILIATION],
   });
   const credential = authority.issueCredential({
-    id: "credential:bob",
+    id: `credential:${id}`,
     principal,
     capabilities,
-    allowedActions: ["step-up:resolve"],
-    allowedResourceIds: ["step-up:requests"],
+    allowedActions: input.allowedActions ?? ["step-up:resolve"],
+    allowedResourceIds: input.allowedResourceIds ?? [
+      "dataset:7",
+      "record:1",
+      "record:customer-7",
+    ],
     issuedAt: ISSUED_AT,
-    expiresAt: EXPIRES_AT,
+    expiresAt: input.expiresAt ?? EXPIRES_AT,
   });
   return { principal, credential };
+}
+
+function stepUpBinding(authorization: StepUpAuthorization): StepUpAuthorizationBinding {
+  const common = {
+    requestId: authorization.requestId,
+    subjectId: authorization.subjectId,
+    subjectType: authorization.subjectType,
+    actingCredentialId: authorization.actingCredentialId,
+    effectiveScopeHash: authorization.effectiveScopeHash,
+    action: authorization.action,
+    actionSensitivity: authorization.actionSensitivity,
+    resourceId: authorization.resourceId,
+    contextHash: authorization.contextHash,
+    policyId: authorization.policyId,
+    policyVersion: authorization.policyVersion,
+    requiredApproverCapability: authorization.requiredApproverCapability,
+    approvedBy: authorization.approvedBy,
+    approvedByType: authorization.approvedByType,
+    approverCredentialId: authorization.approverCredentialId,
+  };
+  return authorization.authorityMode === "DIRECT"
+    ? {
+      ...common,
+      authorityMode: "DIRECT",
+      ...(authorization.credentialId === undefined
+        ? {}
+        : { credentialId: authorization.credentialId }),
+    }
+    : {
+      ...common,
+      authorityMode: "DELEGATED",
+      grantorId: authorization.grantorId,
+      grantorType: authorization.grantorType,
+      grantorCredentialId: authorization.grantorCredentialId,
+      delegationId: authorization.delegationId,
+      delegationBindingHash: authorization.delegationBindingHash,
+    };
 }
 
 function createDelegationHarness(input: {
@@ -199,6 +253,12 @@ function createDelegationHarness(input: {
   readonly delegationExpiresAt?: string;
   readonly policy?: Policy;
   readonly delegate?: Principal;
+  readonly grantorCapabilities?: readonly string[];
+  readonly grantorAllowedActions?: readonly string[];
+  readonly grantorAllowedResourceIds?: readonly string[];
+  readonly delegatedCapabilities?: readonly string[];
+  readonly delegatedAllowedActions?: readonly string[];
+  readonly delegatedAllowedResourceIds?: readonly string[];
 } = {}) {
   const credentialAuthority = new CredentialAuthority({ issuerId: "issuer:ordin" });
   const grantor = createPrincipal({
@@ -214,9 +274,9 @@ function createDelegationHarness(input: {
   const grantorCredential = credentialAuthority.issueCredential({
     id: "credential:grantor",
     principal: grantor,
-    capabilities: ["records:write", "records:read"],
-    allowedActions: ["records:write", "records:read"],
-    allowedResourceIds: ["record:2", "record:1"],
+    capabilities: input.grantorCapabilities ?? ["records:write", "records:read"],
+    allowedActions: input.grantorAllowedActions ?? ["records:write", "records:read"],
+    allowedResourceIds: input.grantorAllowedResourceIds ?? ["record:2", "record:1"],
     issuedAt: ISSUED_AT,
     expiresAt: EXPIRES_AT,
   });
@@ -249,9 +309,9 @@ function createDelegationHarness(input: {
     grantorCredential,
     delegate,
     policy,
-    capabilities: ["records:read"],
-    allowedActions: ["records:read"],
-    allowedResourceIds: ["record:1"],
+    capabilities: input.delegatedCapabilities ?? ["records:read"],
+    allowedActions: input.delegatedAllowedActions ?? ["records:read"],
+    allowedResourceIds: input.delegatedAllowedResourceIds ?? ["record:1"],
     issuedAt: input.delegationIssuedAt ?? ISSUED_AT,
     expiresAt: input.delegationExpiresAt ?? EXPIRES_AT,
   });
@@ -510,14 +570,7 @@ test("7 human step-up approval is bound and consumable exactly once", async () =
   if (!resolved.ok) return;
   const consumeInput = {
     authorization: resolved.authorization,
-    subjectId: decision.subjectId,
-    action: decision.action,
-    actionSensitivity: decision.actionSensitivity,
-    resourceId: decision.resourceId,
-    contextHash: decision.contextHash,
-    policyId: decision.policyId,
-    policyVersion: decision.policyVersion,
-    credentialId: decision.credentialId as string,
+    ...stepUpBinding(resolved.authorization),
     at: "2026-06-01T00:12:00.000Z",
   };
   assert.equal(await service.consumeAuthorization(consumeInput), true);
@@ -544,14 +597,7 @@ test("8 step-up redirect attempts fail for resource, context, policy and sensiti
   if (!resolved.ok) return;
   const base = {
     authorization: resolved.authorization,
-    subjectId: decision.subjectId,
-    action: decision.action,
-    actionSensitivity: decision.actionSensitivity,
-    resourceId: decision.resourceId,
-    contextHash: decision.contextHash,
-    policyId: decision.policyId,
-    policyVersion: decision.policyVersion,
-    credentialId: decision.credentialId as string,
+    ...stepUpBinding(resolved.authorization),
     at: "2026-06-01T00:12:00.000Z",
   };
   assert.equal(await service.consumeAuthorization({ ...base, resourceId: "dataset:8" }), false);
@@ -595,7 +641,7 @@ test("9 unauthorized, rejected and expired step-up paths fail closed", async () 
     principal: authorized,
     capabilities: ["approval:records-export"],
     allowedActions: ["step-up:resolve"],
-    allowedResourceIds: ["step-up:requests"],
+    allowedResourceIds: ["record:customer-7"],
     issuedAt: ISSUED_AT,
     expiresAt: EXPIRES_AT,
   });
@@ -697,14 +743,7 @@ test("11 credential revocation after approval invalidates step-up consumption", 
   assert.equal(
     await service.consumeAuthorization({
       authorization: resolved.authorization,
-      subjectId: decision.subjectId,
-      action: decision.action,
-      actionSensitivity: decision.actionSensitivity,
-      resourceId: decision.resourceId,
-      contextHash: decision.contextHash,
-      policyId: decision.policyId,
-      policyVersion: decision.policyVersion,
-      credentialId: decision.credentialId as string,
+      ...stepUpBinding(resolved.authorization),
       at: "2026-06-01T00:12:00.000Z",
     }),
     false,
@@ -1498,4 +1537,331 @@ test("33 delegated evaluation enforces action, resource and capability attenuati
     evaluateDelegated(insufficient).reasonCode,
     "INSUFFICIENT_DELEGATED_CAPABILITY",
   );
+});
+
+function createDelegatedStepUpHarness() {
+  const policy = createPolicy({
+    id: "policy:delegated-step-up",
+    rules: [{
+      action: "records:export",
+      actionSensitivity: ActionSensitivity.SENSITIVE,
+      requiredCapabilities: ["records:export"],
+      requiredAffiliations: [],
+      effect: "STEP_UP",
+      approverCapability: "approval:records-export",
+    }],
+  });
+  const harness = createDelegationHarness({
+    policy,
+    grantorCapabilities: ["records:export"],
+    grantorAllowedActions: ["records:export"],
+    grantorAllowedResourceIds: ["dataset:7"],
+    delegatedCapabilities: ["records:export"],
+    delegatedAllowedActions: ["records:export"],
+    delegatedAllowedResourceIds: ["dataset:7"],
+  });
+  const decision = evaluateDelegated(harness, {
+    action: "records:export",
+    resourceId: "dataset:7",
+  });
+  assert.equal(decision.outcome, "STEP_UP");
+  const service = new HumanStepUpService({
+    credentialAuthority: harness.credentialAuthority,
+    delegationAuthority: harness.delegationAuthority,
+    nonceStore: new InMemoryAtomicNonceStore(),
+  });
+  return { ...harness, decision, service };
+}
+
+test("34 delegated step-up preserves every authority binding and rejects redirects under 32-way replay", async () => {
+  const harness = createDelegatedStepUpHarness();
+  const request = harness.service.createRequest({
+    id: "step-up:delegated-export",
+    decision: harness.decision,
+    expiresAt: RECEIPT_EXPIRES_AT,
+  });
+  assert.equal(request.version, 2);
+  assert.equal(request.authorityMode, "DELEGATED");
+  if (request.authorityMode !== "DELEGATED") return;
+  assert.equal(request.subjectType, PrincipalType.AGENT);
+  assert.equal(request.actingCredentialId, harness.delegateIdentityCredential.id);
+  assert.equal(request.effectiveScopeHash, harness.delegation.scopeHash);
+  assert.equal(request.grantorId, harness.grantor.id);
+  assert.equal(request.grantorType, harness.grantor.type);
+  assert.equal(request.grantorCredentialId, harness.grantorCredential.id);
+  assert.equal(request.delegationId, harness.delegation.id);
+  assert.equal(request.delegationBindingHash, harness.delegation.delegationBindingHash);
+
+  const approver = createApprover(harness.credentialAuthority, undefined, { id: "delegated-approver" });
+  const resolved = await harness.service.resolveRequest({
+    requestId: request.id,
+    resolution: "APPROVE",
+    approver: approver.principal,
+    approverCredential: approver.credential,
+    at: APPROVED_AT,
+  });
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok || resolved.authorization.authorityMode !== "DELEGATED") return;
+  const authorization = resolved.authorization;
+  assert.equal(authorization.version, 2);
+  assert.equal(authorization.approvedByType, PrincipalType.HUMAN);
+  assert.equal(authorization.approverCredentialId, approver.credential.id);
+  assert.equal(authorization.delegationBindingHash, harness.delegation.delegationBindingHash);
+
+  const base = {
+    authorization,
+    ...stepUpBinding(authorization),
+    at: "2026-06-01T00:12:00.000Z",
+  };
+  const zeroHash = `sha256:${"0".repeat(64)}`;
+  const redirects: readonly Record<string, unknown>[] = [
+    { ...base, requestId: "step-up:other" },
+    { ...base, authorityMode: "DIRECT" },
+    { ...base, subjectId: "principal:other" },
+    { ...base, subjectType: PrincipalType.HUMAN },
+    { ...base, actingCredentialId: "credential:other" },
+    { ...base, effectiveScopeHash: zeroHash },
+    { ...base, action: "records:read" },
+    { ...base, actionSensitivity: ActionSensitivity.CRITICAL },
+    { ...base, resourceId: "dataset:8" },
+    { ...base, contextHash: zeroHash },
+    { ...base, policyId: "policy:other" },
+    { ...base, policyVersion: zeroHash },
+    { ...base, requiredApproverCapability: "approval:other" },
+    { ...base, approvedBy: "principal:other" },
+    { ...base, approvedByType: PrincipalType.AGENT },
+    { ...base, approverCredentialId: "credential:other" },
+    { ...base, grantorId: "principal:other" },
+    { ...base, grantorType: PrincipalType.HUMAN },
+    { ...base, grantorCredentialId: "credential:other" },
+    { ...base, delegationId: "delegation:other" },
+    { ...base, delegationBindingHash: zeroHash },
+  ];
+  for (const redirected of redirects) {
+    assert.equal(
+      await harness.service.consumeAuthorization(
+        redirected as unknown as Parameters<HumanStepUpService["consumeAuthorization"]>[0],
+      ),
+      false,
+    );
+  }
+  const winners = await Promise.all(
+    Array.from({ length: 32 }, () => harness.service.consumeAuthorization(base)),
+  );
+  assert.equal(winners.filter(Boolean).length, 1);
+});
+
+test("35 step-up approval is human-only and action/resource scoped", async () => {
+  const harness = createHarness();
+  const decision = evaluate(harness, { action: "records:export", resourceId: "dataset:7" });
+  const service = new HumanStepUpService({
+    credentialAuthority: harness.authority,
+    nonceStore: new InMemoryAtomicNonceStore(),
+  });
+  const request = service.createRequest({
+    id: "step-up:approver-scope",
+    decision,
+    expiresAt: RECEIPT_EXPIRES_AT,
+  });
+  const agent = createApprover(harness.authority, undefined, {
+    id: "agent-approver",
+    type: PrincipalType.AGENT,
+  });
+  assert.deepEqual(
+    await service.resolveRequest({
+      requestId: request.id,
+      resolution: "APPROVE",
+      approver: agent.principal,
+      approverCredential: agent.credential,
+      at: APPROVED_AT,
+    }),
+    { ok: false, reasonCode: "APPROVER_CREDENTIAL_INVALID" },
+  );
+  const wrongAction = createApprover(harness.authority, undefined, {
+    id: "wrong-action",
+    allowedActions: ["records:read"],
+  });
+  assert.deepEqual(
+    await service.resolveRequest({
+      requestId: request.id,
+      resolution: "APPROVE",
+      approver: wrongAction.principal,
+      approverCredential: wrongAction.credential,
+      at: APPROVED_AT,
+    }),
+    { ok: false, reasonCode: "APPROVER_SCOPE_MISSING" },
+  );
+  const wrongResource = createApprover(harness.authority, undefined, {
+    id: "wrong-resource",
+    allowedResourceIds: ["dataset:8"],
+  });
+  assert.deepEqual(
+    await service.resolveRequest({
+      requestId: request.id,
+      resolution: "APPROVE",
+      approver: wrongResource.principal,
+      approverCredential: wrongResource.credential,
+      at: APPROVED_AT,
+    }),
+    { ok: false, reasonCode: "APPROVER_SCOPE_MISSING" },
+  );
+  const valid = createApprover(harness.authority, undefined, { id: "valid-human" });
+  assert.equal((await service.resolveRequest({
+    requestId: request.id,
+    resolution: "APPROVE",
+    approver: valid.principal,
+    approverCredential: valid.credential,
+    at: APPROVED_AT,
+  })).ok, true);
+});
+
+test("36 delegated step-up revalidates acting, grantor and delegation authority at every transition", async () => {
+  const beforeResolutionCases = ["acting", "grantor", "delegation"] as const;
+  for (const authority of beforeResolutionCases) {
+    const harness = createDelegatedStepUpHarness();
+    const request = harness.service.createRequest({
+      id: `step-up:revoke-before:${authority}`,
+      decision: harness.decision,
+      expiresAt: RECEIPT_EXPIRES_AT,
+    });
+    if (authority === "acting") {
+      harness.credentialAuthority.revokeCredential(harness.delegateIdentityCredential.id, {
+        revokedAt: "2026-06-01T00:10:30.000Z",
+        reason: "acting-revoked",
+      });
+    } else if (authority === "grantor") {
+      harness.credentialAuthority.revokeCredential(harness.grantorCredential.id, {
+        revokedAt: "2026-06-01T00:10:30.000Z",
+        reason: "grantor-revoked",
+      });
+    } else {
+      harness.delegationAuthority.revokeDelegation(harness.delegation.id, {
+        revokedAt: "2026-06-01T00:10:30.000Z",
+        reason: "delegation-revoked",
+      });
+    }
+    const approver = createApprover(harness.credentialAuthority, undefined, { id: `before-${authority}` });
+    assert.deepEqual(
+      await harness.service.resolveRequest({
+        requestId: request.id,
+        resolution: "APPROVE",
+        approver: approver.principal,
+        approverCredential: approver.credential,
+        at: APPROVED_AT,
+      }),
+      { ok: false, reasonCode: "SUBJECT_AUTHORITY_INVALID" },
+    );
+  }
+
+  const afterApprovalCases = ["acting", "grantor", "delegation"] as const;
+  for (const authority of afterApprovalCases) {
+    const harness = createDelegatedStepUpHarness();
+    const request = harness.service.createRequest({
+      id: `step-up:revoke-after:${authority}`,
+      decision: harness.decision,
+      expiresAt: RECEIPT_EXPIRES_AT,
+    });
+    const approver = createApprover(harness.credentialAuthority, undefined, { id: `after-${authority}` });
+    const resolved = await harness.service.resolveRequest({
+      requestId: request.id,
+      resolution: "APPROVE",
+      approver: approver.principal,
+      approverCredential: approver.credential,
+      at: APPROVED_AT,
+    });
+    assert.equal(resolved.ok, true);
+    if (!resolved.ok) continue;
+    if (authority === "acting") {
+      harness.credentialAuthority.revokeCredential(harness.delegateIdentityCredential.id, {
+        revokedAt: "2026-06-01T00:11:30.000Z",
+        reason: "acting-revoked",
+      });
+    } else if (authority === "grantor") {
+      harness.credentialAuthority.revokeCredential(harness.grantorCredential.id, {
+        revokedAt: "2026-06-01T00:11:30.000Z",
+        reason: "grantor-revoked",
+      });
+    } else {
+      harness.delegationAuthority.revokeDelegation(harness.delegation.id, {
+        revokedAt: "2026-06-01T00:11:30.000Z",
+        reason: "delegation-revoked",
+      });
+    }
+    assert.equal(
+      await harness.service.consumeAuthorization({
+        authorization: resolved.authorization,
+        ...stepUpBinding(resolved.authorization),
+        at: "2026-06-01T00:12:00.000Z",
+      }),
+      false,
+    );
+  }
+});
+
+test("37 step-up expiry is capped by subject, delegation and approver artifacts", async () => {
+  const direct = createHarness({ credentialExpiresAt: "2026-06-01T00:19:00.000Z" });
+  const directService = new HumanStepUpService({
+    credentialAuthority: direct.authority,
+    nonceStore: new InMemoryAtomicNonceStore(),
+  });
+  assert.throws(
+    () => directService.createRequest({
+      id: "step-up:direct-expiry-cap",
+      decision: evaluate(direct, { action: "records:export", resourceId: "dataset:7" }),
+      expiresAt: RECEIPT_EXPIRES_AT,
+    }),
+    DomainValidationError,
+  );
+
+  const delegated = createDelegatedStepUpHarness();
+  const shortDelegation = createDelegationHarness({
+    policy: delegated.policy,
+    delegationExpiresAt: "2026-06-01T00:19:00.000Z",
+    grantorCapabilities: ["records:export"],
+    grantorAllowedActions: ["records:export"],
+    grantorAllowedResourceIds: ["dataset:7"],
+    delegatedCapabilities: ["records:export"],
+    delegatedAllowedActions: ["records:export"],
+    delegatedAllowedResourceIds: ["dataset:7"],
+  });
+  const shortService = new HumanStepUpService({
+    credentialAuthority: shortDelegation.credentialAuthority,
+    delegationAuthority: shortDelegation.delegationAuthority,
+    nonceStore: new InMemoryAtomicNonceStore(),
+  });
+  assert.throws(
+    () => shortService.createRequest({
+      id: "step-up:delegation-expiry-cap",
+      decision: evaluateDelegated(shortDelegation, {
+        action: "records:export",
+        resourceId: "dataset:7",
+      }),
+      expiresAt: RECEIPT_EXPIRES_AT,
+    }),
+    DomainValidationError,
+  );
+
+  const harness = createHarness();
+  const service = new HumanStepUpService({
+    credentialAuthority: harness.authority,
+    nonceStore: new InMemoryAtomicNonceStore(),
+  });
+  const request = service.createRequest({
+    id: "step-up:approver-expiry-cap",
+    decision: evaluate(harness, { action: "records:export", resourceId: "dataset:7" }),
+    expiresAt: RECEIPT_EXPIRES_AT,
+  });
+  const approver = createApprover(harness.authority, undefined, {
+    id: "short-lived-approver",
+    expiresAt: "2026-06-01T00:11:30.000Z",
+  });
+  const resolved = await service.resolveRequest({
+    requestId: request.id,
+    resolution: "APPROVE",
+    approver: approver.principal,
+    approverCredential: approver.credential,
+    at: APPROVED_AT,
+  });
+  assert.equal(resolved.ok, true);
+  if (resolved.ok) assert.equal(resolved.authorization.expiresAt, "2026-06-01T00:11:30.000Z");
 });

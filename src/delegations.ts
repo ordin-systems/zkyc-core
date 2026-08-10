@@ -465,6 +465,15 @@ export class DelegationAuthority {
     return Object.freeze({ valid: true, code: "ACTIVE" });
   }
 
+  getActiveDelegationById(
+    delegationId: unknown,
+    at: unknown,
+  ): CapabilityDelegation | undefined {
+    const status = this.checkDelegationById(delegationId, at);
+    if (!status.valid) return undefined;
+    return this.#issued.get(delegationId as string);
+  }
+
   checkDelegationById(
     delegationId: unknown,
     at: unknown,

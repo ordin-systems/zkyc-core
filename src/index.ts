@@ -54,7 +54,14 @@ export {
 } from "./nonce.js";
 export {
   HumanStepUpService,
+  type DelegatedStepUpAuthorization,
+  type DelegatedStepUpAuthorizationBinding,
+  type DelegatedStepUpRequest,
+  type DirectStepUpAuthorization,
+  type DirectStepUpAuthorizationBinding,
+  type DirectStepUpRequest,
   type StepUpAuthorization,
+  type StepUpAuthorizationBinding,
   type StepUpFailureCode,
   type StepUpRequest,
   type StepUpResolutionResult,

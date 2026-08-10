@@ -257,6 +257,22 @@ export class CredentialAuthority {
     return this.#statusAt(registered, checkedAt);
   }
 
+  getActiveCredentialById(
+    credentialId: unknown,
+    at: unknown,
+    expectedPrincipalId?: unknown,
+    expectedPrincipalType?: unknown,
+  ): Credential | undefined {
+    const status = this.checkCredentialById(
+      credentialId,
+      at,
+      expectedPrincipalId,
+      expectedPrincipalType,
+    );
+    if (!status.valid) return undefined;
+    return this.#issued.get(credentialId as string);
+  }
+
   checkCredentialById(
     credentialId: unknown,
     at: unknown,
