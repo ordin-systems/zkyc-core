@@ -117,13 +117,9 @@ export interface PolicyInput {
 
 interface CommonAccessDecision {
   readonly version: 2;
-  readonly outcome: DecisionOutcome;
-  readonly reasonCode: ReasonCode;
   readonly authorityMode: AuthorityMode;
   readonly subjectId: string;
   readonly subjectType: PrincipalType;
-  readonly actingCredentialId: string;
-  readonly effectiveScopeHash: string;
   readonly action: string;
   readonly actionSensitivity: ActionSensitivity;
   readonly resourceId: string;
@@ -131,11 +127,18 @@ interface CommonAccessDecision {
   readonly policyId: string;
   readonly policyVersion: string;
   readonly decidedAt: string;
+}
+
+interface CommonBoundAccessDecision extends CommonAccessDecision {
+  readonly outcome: DecisionOutcome;
+  readonly reasonCode: ReasonCode;
+  readonly actingCredentialId: string;
+  readonly effectiveScopeHash: string;
   readonly requiredApproverCapability?: string;
   readonly unverifiedMetadata?: UnverifiedMetadata;
 }
 
-export interface DirectAccessDecision extends CommonAccessDecision {
+export interface BoundDirectAccessDecision extends CommonBoundAccessDecision {
   readonly authorityMode: "DIRECT";
   /** @deprecated Direct-mode compatibility alias. When present it equals actingCredentialId. */
   readonly credentialId?: string;
@@ -146,7 +149,25 @@ export interface DirectAccessDecision extends CommonAccessDecision {
   readonly delegationBindingHash?: never;
 }
 
-export interface DelegatedAccessDecision extends CommonAccessDecision {
+export interface UnboundDirectDenyAccessDecision extends CommonAccessDecision {
+  readonly authorityMode: "DIRECT";
+  readonly outcome: "DENY";
+  readonly reasonCode: "CREDENTIAL_MISSING";
+  readonly actingCredentialId?: never;
+  readonly effectiveScopeHash?: never;
+  readonly credentialId?: never;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
+  readonly requiredApproverCapability?: never;
+  readonly unverifiedMetadata?: never;
+}
+
+export type DirectAccessDecision = BoundDirectAccessDecision | UnboundDirectDenyAccessDecision;
+
+export interface DelegatedAccessDecision extends CommonBoundAccessDecision {
   readonly authorityMode: "DELEGATED";
   readonly credentialId?: never;
   readonly grantorId: string;
@@ -156,7 +177,8 @@ export interface DelegatedAccessDecision extends CommonAccessDecision {
   readonly delegationBindingHash: string;
 }
 
-export type AccessDecision = DirectAccessDecision | DelegatedAccessDecision;
+export type BoundAccessDecision = BoundDirectAccessDecision | DelegatedAccessDecision;
+export type AccessDecision = BoundAccessDecision | UnboundDirectDenyAccessDecision;
 
 interface CommonReceiptBinding {
   readonly authorityMode: AuthorityMode;
@@ -404,13 +426,24 @@ interface CommonEvaluateRequest {
   readonly receiptExpiresAt?: string;
 }
 
-export interface DirectEvaluateRequest extends CommonEvaluateRequest {
+interface CommonDirectEvaluateRequest extends CommonEvaluateRequest {
   readonly authorityMode: "DIRECT";
-  readonly credential: Credential | null;
   readonly delegateIdentityCredential?: never;
   readonly grantorCredential?: never;
   readonly delegation?: never;
 }
+
+export interface CredentialPresentDirectEvaluateRequest extends CommonDirectEvaluateRequest {
+  readonly credential: Credential;
+}
+
+export interface CredentiallessDirectEvaluateRequest extends CommonDirectEvaluateRequest {
+  readonly credential: null;
+}
+
+export type DirectEvaluateRequest =
+  | CredentialPresentDirectEvaluateRequest
+  | CredentiallessDirectEvaluateRequest;
 
 export interface DelegatedEvaluateRequest extends CommonEvaluateRequest {
   readonly authorityMode: "DELEGATED";
@@ -421,6 +454,17 @@ export interface DelegatedEvaluateRequest extends CommonEvaluateRequest {
 }
 
 export type EvaluateRequest = DirectEvaluateRequest | DelegatedEvaluateRequest;
+
+export interface EvaluationResponse<TDecision extends AccessDecision = AccessDecision> {
+  readonly logId: string;
+  readonly decision: TDecision;
+  readonly receipt?: SignedReceipt;
+}
+
+export interface StepUpRequestResponse {
+  readonly decisionLogId: string;
+  readonly request: StepUpRequest;
+}
 
 export interface ResolveStepUpRequest {
   readonly resolution: "APPROVE" | "REJECT";
@@ -686,7 +730,7 @@ export class ZkycReferenceClient {
     );
   }
 
-  evaluate(input: EvaluateRequest) {
+  evaluate(input: EvaluateRequest): Promise<EvaluationResponse> {
     return this.#request("evaluations", (value) => {
       const response = validateEvaluationResponse(value);
       const decision = response.decision;
@@ -699,8 +743,19 @@ export class ZkycReferenceClient {
         decision.policyId === input.policy.id,
       );
       if (input.authorityMode === "DIRECT") {
-        if (input.credential !== null) {
+        if (input.credential === null) {
           requireResponseCorrelation(
+            decision.authorityMode === "DIRECT" &&
+            decision.outcome === "DENY" &&
+            decision.reasonCode === "CREDENTIAL_MISSING" &&
+            decision.actingCredentialId === undefined &&
+            decision.effectiveScopeHash === undefined &&
+            decision.credentialId === undefined &&
+            response.receipt === undefined,
+          );
+        } else {
+          requireResponseCorrelation(
+            decision.authorityMode === "DIRECT" &&
             decision.actingCredentialId === input.credential.id &&
             decision.effectiveScopeHash === input.credential.scopeHash,
           );
@@ -722,7 +777,11 @@ export class ZkycReferenceClient {
   }
 
   createStepUpRequest(input: { readonly decisionLogId: string; readonly expiresAt: string }) {
-    return this.#request("step-up/requests", validateStepUpRequestResponse, "POST", input);
+    return this.#request("step-up/requests", (value) => {
+      const response = validateStepUpRequestResponse(value);
+      requireResponseCorrelation(response.decisionLogId === input.decisionLogId);
+      return response;
+    }, "POST", input);
   }
 
   resolveStepUpRequest(requestId: string, input: ResolveStepUpRequest) {

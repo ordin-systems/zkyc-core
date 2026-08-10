@@ -6,6 +6,7 @@ import {
   ZkycApiError,
   ZkycReferenceClient,
   type AccessDecision,
+  type BoundAccessDecision,
   type CapabilityDelegation,
   type Credential,
   type ReceiptExpectedBinding,
@@ -263,7 +264,7 @@ function validateExpectation(op: Operation, value: unknown, label: string): void
   if (op === "issueCredential" || op === "issueDelegation") required = ["status"];
   else if (op === "revokeCredential" || op === "revokeDelegation") required = ["status", "revoked"];
   else if (op === "evaluate") required = ["status", "outcome", "reasonCode"];
-  else if (op === "createStepUpRequest") required = ["status", "approvalStatus"];
+  else if (op === "createStepUpRequest") required = ["status", "approvalStatus", "decisionLogId"];
   else if (op === "resolveStepUp") {
     required = initial.approvalStatus === "REJECTED"
       ? ["status", "reasonCode", "approvalStatus"]
@@ -279,7 +280,14 @@ function validateExpectation(op: Operation, value: unknown, label: string): void
   for (const key of ["revoked", "authorized", "valid"]) {
     if (expectation[key] !== undefined) assert.equal(typeof expectation[key], "boolean", `${label}.${key} must be boolean`);
   }
-  for (const key of ["outcome", "reasonCode", "receiptState", "verificationStatus", "approvalStatus"]) {
+  for (const key of [
+    "outcome",
+    "reasonCode",
+    "receiptState",
+    "verificationStatus",
+    "approvalStatus",
+    "decisionLogId",
+  ]) {
     if (expectation[key] !== undefined) text(expectation[key], `${label}.${key}`);
   }
 }
@@ -330,11 +338,12 @@ function principalFor(credential: Credential) {
   };
 }
 
+function isBoundDecision(decision: AccessDecision): decision is BoundAccessDecision {
+  return decision.actingCredentialId !== undefined && decision.effectiveScopeHash !== undefined;
+}
+
 function receiptExpected(decision: AccessDecision): ReceiptExpectedBinding {
-  assert.ok(decision.authorityMode);
-  assert.ok(decision.subjectType);
-  assert.ok(decision.actingCredentialId);
-  assert.ok(decision.effectiveScopeHash);
+  assert.ok(isBoundDecision(decision), "receipt decision must carry authority bindings");
   const common = {
     authorityMode: decision.authorityMode,
     subjectId: decision.subjectId,
@@ -404,6 +413,7 @@ function assertExpected(step: TranscriptStep, actual: { readonly status: number;
     approvalStatus: (body.request as JsonRecord | undefined)?.status ??
       (body.requiredApproval as JsonRecord | undefined)?.status ??
       (body.ok === true ? "APPROVED" : body.ok === false ? "REJECTED" : undefined),
+    decisionLogId: body.decisionLogId,
     authorized: body.authorized,
     valid: body.valid,
     revoked: body.revoked,

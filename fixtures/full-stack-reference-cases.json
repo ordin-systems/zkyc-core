@@ -404,7 +404,8 @@
           },
           "expect": {
             "status": 201,
-            "approvalStatus": "PENDING"
+            "approvalStatus": "PENDING",
+            "decisionLogId": "decision-log:fixture:direct-step-up-approval:1"
           }
         },
         {
@@ -620,7 +621,8 @@
           },
           "expect": {
             "status": 201,
-            "approvalStatus": "PENDING"
+            "approvalStatus": "PENDING",
+            "decisionLogId": "decision-log:fixture:step-up-rejection:1"
           }
         },
         {

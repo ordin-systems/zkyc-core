@@ -731,7 +731,7 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
       expiresAt: body.expiresAt as string,
     });
     requestByDecisionLogId.set(body.decisionLogId, request.id);
-    return context.json({ request }, 201);
+    return context.json({ decisionLogId: body.decisionLogId, request }, 201);
   });
 
   app.post("/step-up/requests/:requestId/resolve", async (context) => {

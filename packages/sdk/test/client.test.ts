@@ -6,6 +6,7 @@ import {
   ZkycReferenceClient,
   ZkycTransportError,
   type AccessDecision,
+  type BoundAccessDecision,
   type CapabilityDelegation,
   type ConsumeStepUpAuthorizationRequest,
   type Credential,
@@ -94,7 +95,12 @@ async function issueCredential(
   return response.credential;
 }
 
+function isBoundDecision(decision: AccessDecision): decision is BoundAccessDecision {
+  return decision.actingCredentialId !== undefined && decision.effectiveScopeHash !== undefined;
+}
+
 function receiptExpected(decision: AccessDecision): ReceiptExpectedBinding {
+  assert.ok(isBoundDecision(decision), "receipt decision must carry authority bindings");
   const common = {
     authorityMode: decision.authorityMode,
     subjectId: decision.subjectId,
@@ -238,6 +244,27 @@ test("SDK executes the direct v0.3 lifecycle through the real Hono adapter", asy
   ]);
 });
 
+test("SDK accepts the real Hono credentialless direct denial without authority bindings", async () => {
+  const { client } = harness();
+  const evaluated = await client.evaluate({
+    authorityMode: "DIRECT",
+    principal: human,
+    credential: null,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-credentialless-denial" },
+    policy: policy("ALLOW", "records:read"),
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.outcome, "DENY");
+  assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_MISSING");
+  assert.equal(evaluated.decision.authorityMode, "DIRECT");
+  assert.equal("actingCredentialId" in evaluated.decision, false);
+  assert.equal("effectiveScopeHash" in evaluated.decision, false);
+  assert.equal("credentialId" in evaluated.decision, false);
+});
+
 test("SDK executes delegated issuance, evaluation, onboarding, receipt, and revocation", async () => {
   const { client } = harness();
   const grantor: Principal = { id: "organization:grantor", type: "ORGANIZATION", affiliations: [] };
@@ -378,6 +405,27 @@ const staticDecision: AccessDecision = {
   credentialId: staticCredential.id,
   decidedAt: START,
 };
+
+const staticStepUpRequest = {
+  version: 2,
+  id: "step-up-request:static",
+  authorityMode: "DIRECT",
+  subjectId: human.id,
+  subjectType: human.type,
+  actingCredentialId: staticCredential.id,
+  effectiveScopeHash: staticCredential.scopeHash,
+  action: "records:export",
+  actionSensitivity: "SENSITIVE",
+  resourceId: RESOURCE,
+  contextHash: HASH_0,
+  policyId: "policy:step-up",
+  policyVersion: HASH_1,
+  credentialId: staticCredential.id,
+  requiredApproverCapability: "approval:records-export",
+  requestedAt: START,
+  expiresAt: ARTIFACT_EXPIRY,
+  status: "PENDING",
+} as const;
 
 const staticDelegation: CapabilityDelegation = {
   version: 1,
@@ -532,6 +580,18 @@ test("SDK rejects valid responses bound to a different requested authority recor
     issueReceipt: false,
   }));
 
+  const stepUpClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      decisionLogId: "decision-log:other",
+      request: staticStepUpRequest,
+    }, 201)),
+  });
+  await expectInvalidResponse(() => stepUpClient.createStepUpRequest({
+    decisionLogId: "decision-log:static",
+    expiresAt: ARTIFACT_EXPIRY,
+  }));
+
   const onboardingClient = new ZkycReferenceClient({
     baseUrl: "https://invalid.reference",
     fetch: () => Promise.resolve(jsonResponse({
@@ -553,6 +613,89 @@ test("SDK rejects valid responses bound to a different requested authority recor
     approver: human,
     approverCredential: staticCredential,
   }));
+});
+
+test("SDK accepts only exact credentialless direct denial and step-up response envelopes", async () => {
+  const { actingCredentialId: _acting, effectiveScopeHash: _scope, credentialId: _credential, ...unboundBase } =
+    staticDecision;
+  const unboundDenial = {
+    ...unboundBase,
+    outcome: "DENY",
+    reasonCode: "CREDENTIAL_MISSING",
+  } as const;
+  const credentiallessInput = {
+    authorityMode: "DIRECT",
+    principal: human,
+    credential: null,
+    action: staticDecision.action,
+    resourceId: staticDecision.resourceId,
+    actionContext: {},
+    policy: { id: staticDecision.policyId, rules: [] },
+    issueReceipt: false,
+  } as const;
+
+  const denialClient = new ZkycReferenceClient({
+    baseUrl: "https://valid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      logId: "decision-log:credentialless",
+      decision: unboundDenial,
+    })),
+  });
+  assert.equal((await denialClient.evaluate(credentiallessInput)).decision.reasonCode, "CREDENTIAL_MISSING");
+
+  for (const invalidDecision of [
+    { ...unboundDenial, outcome: "ALLOW", reasonCode: "POLICY_ALLOW" },
+    {
+      ...unboundDenial,
+      outcome: "STEP_UP",
+      reasonCode: "HUMAN_APPROVAL_REQUIRED",
+      requiredApproverCapability: "approval:records-export",
+    },
+    { ...unboundDenial, reasonCode: "POLICY_DENY" },
+    { ...unboundDenial, reasonCode: "CREDENTIAL_MALFORMED" },
+    { ...unboundDenial, reasonCode: "CREDENTIAL_UNKNOWN" },
+    { ...unboundDenial, actingCredentialId: staticCredential.id },
+    { ...unboundDenial, effectiveScopeHash: staticCredential.scopeHash },
+    { ...unboundDenial, credentialId: staticCredential.id },
+    staticDecision,
+    { ...staticDecision, outcome: "DENY", reasonCode: "CREDENTIAL_MISSING" },
+  ]) {
+    const client = new ZkycReferenceClient({
+      baseUrl: "https://invalid.reference",
+      fetch: () => Promise.resolve(jsonResponse({
+        logId: "decision-log:invalid-credentialless",
+        decision: invalidDecision,
+      })),
+    });
+    await expectInvalidResponse(() => client.evaluate(credentiallessInput));
+  }
+
+  const validStepUpClient = new ZkycReferenceClient({
+    baseUrl: "https://valid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      decisionLogId: "decision-log:static",
+      request: staticStepUpRequest,
+    }, 201)),
+  });
+  assert.equal((await validStepUpClient.createStepUpRequest({
+    decisionLogId: "decision-log:static",
+    expiresAt: ARTIFACT_EXPIRY,
+  })).decisionLogId, "decision-log:static");
+
+  for (const malformed of [
+    { request: staticStepUpRequest },
+    { decisionLogId: "decision-log:static" },
+    { decisionLogId: "decision-log:static", request: staticStepUpRequest, unexpected: true },
+  ]) {
+    const client = new ZkycReferenceClient({
+      baseUrl: "https://invalid.reference",
+      fetch: () => Promise.resolve(jsonResponse(malformed, 201)),
+    });
+    await expectInvalidResponse(() => client.createStepUpRequest({
+      decisionLogId: "decision-log:static",
+      expiresAt: ARTIFACT_EXPIRY,
+    }));
+  }
 });
 
 test("SDK rejects valid decision-log entries whose duplicated principal identity conflicts", async () => {

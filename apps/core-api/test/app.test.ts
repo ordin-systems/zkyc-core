@@ -339,7 +339,9 @@ async function createStepUpRequest(
     body: { decisionLogId, expiresAt: RECEIPT_EXPIRY },
   });
   assert.equal(result.response.status, 201, JSON.stringify(result.body));
-  return (result.body as { request: { id: string } }).request;
+  assert.deepEqual(Object.keys(result.body as JsonRecord).sort(), ["decisionLogId", "request"]);
+  assert.equal((result.body as JsonRecord).decisionLogId, decisionLogId);
+  return (result.body as { decisionLogId: string; request: { id: string } }).request;
 }
 
 async function delegatedArtifacts(

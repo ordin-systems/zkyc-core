@@ -4,6 +4,7 @@ import {
   ZkycReferenceClient,
   ZkycTransportError,
   type AccessDecision,
+  type BoundAccessDecision,
   type CapabilityDelegation,
   type Credential,
   type DecisionLogEntry,
@@ -52,7 +53,12 @@ function errorMessage(error: unknown): string {
   return "The reference flow failed closed.";
 }
 
+function isBoundDecision(decision: AccessDecision): decision is BoundAccessDecision {
+  return decision.actingCredentialId !== undefined && decision.effectiveScopeHash !== undefined;
+}
+
 function receiptExpectedBinding(decision: AccessDecision): ReceiptExpectedBinding {
+  if (!isBoundDecision(decision)) throw new Error("receipt decision is missing authority bindings");
   const common = {
     authorityMode: decision.authorityMode,
     subjectId: decision.subjectId,

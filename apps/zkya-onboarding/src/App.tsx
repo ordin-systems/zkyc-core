@@ -4,6 +4,7 @@ import {
   ZkycReferenceClient,
   ZkycTransportError,
   type AccessDecision,
+  type BoundAccessDecision,
   type OnboardingView,
   type ReceiptExpectedBinding,
 } from "@ordin/zkyc-sdk-reference";
@@ -38,7 +39,12 @@ function errorMessage(error: unknown): string {
   return "Reference flow failed closed. No authority state was inferred.";
 }
 
+function isBoundDecision(decision: AccessDecision): decision is BoundAccessDecision {
+  return decision.actingCredentialId !== undefined && decision.effectiveScopeHash !== undefined;
+}
+
 function receiptExpectedBinding(decision: AccessDecision): ReceiptExpectedBinding {
+  if (!isBoundDecision(decision)) throw new Error("receipt decision is missing authority bindings");
   const common = {
     authorityMode: decision.authorityMode,
     subjectId: decision.subjectId,

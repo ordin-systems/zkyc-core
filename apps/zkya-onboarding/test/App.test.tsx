@@ -5,6 +5,8 @@ import {
   ZkycApiError,
   ZkycTransportError,
   type AccessDecision,
+  type BoundAccessDecision,
+  type BoundDirectAccessDecision,
   type CapabilityDelegation,
   type Credential,
   type OnboardingView,
@@ -62,7 +64,10 @@ function credential(input: Parameters<OnboardingClient["issueCredential"]>[0], i
   };
 }
 
-function directDecision(outcome: "ALLOW" | "DENY" | "STEP_UP", reasonCode: AccessDecision["reasonCode"]): AccessDecision {
+function directDecision(
+  outcome: "ALLOW" | "DENY" | "STEP_UP",
+  reasonCode: AccessDecision["reasonCode"],
+): BoundDirectAccessDecision {
   return {
     version: 2,
     outcome,
@@ -84,8 +89,12 @@ function directDecision(outcome: "ALLOW" | "DENY" | "STEP_UP", reasonCode: Acces
   };
 }
 
+function isBoundDecision(decision: AccessDecision): decision is BoundAccessDecision {
+  return decision.actingCredentialId !== undefined && decision.effectiveScopeHash !== undefined;
+}
+
 function receipt(decision: AccessDecision): SignedReceipt {
-  if (decision.authorityMode !== "DIRECT" || decision.credentialId === undefined) {
+  if (!isBoundDecision(decision) || decision.authorityMode !== "DIRECT" || decision.credentialId === undefined) {
     throw new Error("direct test receipt expected");
   }
   return {
@@ -125,7 +134,10 @@ function basicClient(getView: () => OnboardingView = () => view()): OnboardingCl
       logId: "decision-log:test",
       decision: directDecision("ALLOW", "POLICY_ALLOW"),
     })),
-    createStepUpRequest: vi.fn(async () => ({ request: {} as StepUpRequest })),
+    createStepUpRequest: vi.fn(async (input) => ({
+      decisionLogId: input.decisionLogId,
+      request: {} as StepUpRequest,
+    })),
     resolveStepUpRequest: vi.fn(async () => ({ ok: false as const, reasonCode: "STEP_UP_REJECTED" })),
     consumeReceipt: vi.fn(async () => ({ valid: true, reasonCode: "RECEIPT_VALID" })),
     getOnboardingView: vi.fn(async () => getView()),
@@ -333,7 +345,7 @@ function stepUpClient(): { client: OnboardingClient; approval: { status: "PENDIN
     requiredApproval: { status: approval.status, requestId: request.id },
   }));
   client.evaluate = vi.fn(async () => ({ logId: "decision-log:test", decision }));
-  client.createStepUpRequest = vi.fn(async () => ({ request }));
+  client.createStepUpRequest = vi.fn(async (input) => ({ decisionLogId: input.decisionLogId, request }));
   client.resolveStepUpRequest = vi.fn(async (_id, input) => {
     approval.status = input.resolution === "APPROVE" ? "APPROVED" : "REJECTED";
     return input.resolution === "APPROVE"

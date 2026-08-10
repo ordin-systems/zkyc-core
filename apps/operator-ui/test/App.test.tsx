@@ -4,6 +4,7 @@ import { afterEach, expect, test } from "vitest";
 import {
   ZkycTransportError,
   type AccessDecision,
+  type BoundAccessDecision,
   type CapabilityDelegation,
   type Credential,
   type DecisionOutcome,
@@ -23,7 +24,12 @@ interface ReferenceClientState {
   readonly delegatedCalls: { count: number };
 }
 
+function isBoundDecision(decision: AccessDecision): decision is BoundAccessDecision {
+  return decision.actingCredentialId !== undefined && decision.effectiveScopeHash !== undefined;
+}
+
 function receiptFor(decision: AccessDecision): SignedReceipt {
+  if (!isBoundDecision(decision)) throw new Error("receipt decision is missing authority bindings");
   const common = {
     version: 2 as const,
     authorityMode: decision.authorityMode,
@@ -164,7 +170,7 @@ function referenceClient(): ReferenceClientState {
         ...(outcome === "ALLOW" ? { receipt: receiptFor(decision) } : {}),
       };
     },
-    createStepUpRequest: async () => {
+    createStepUpRequest: async (input) => {
       const request: StepUpRequest = {
         version: 2,
         id: "step-up-request:ui-1",
@@ -185,7 +191,7 @@ function referenceClient(): ReferenceClientState {
         expiresAt: later,
         status: "PENDING",
       };
-      return { request };
+      return { decisionLogId: input.decisionLogId, request };
     },
     resolveStepUpRequest: async (_id, input) => {
       if (input.resolution === "REJECT") return { ok: false, reasonCode: "STEP_UP_REJECTED" };

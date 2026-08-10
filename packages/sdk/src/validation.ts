@@ -2,6 +2,7 @@ import type {
   AccessDecision,
   Affiliation,
   AuthorityMode,
+  BoundAccessDecision,
   CapabilityDelegation,
   Credential,
   DecisionLogEntry,
@@ -331,15 +332,13 @@ function validateDelegationValue(value: unknown): CapabilityDelegation {
   };
 }
 
-const decisionCommonFields = [
+const decisionCoreFields = [
   "version",
   "outcome",
   "reasonCode",
   "authorityMode",
   "subjectId",
   "subjectType",
-  "actingCredentialId",
-  "effectiveScopeHash",
   "action",
   "actionSensitivity",
   "resourceId",
@@ -349,6 +348,9 @@ const decisionCommonFields = [
   "decidedAt",
 ] as const;
 
+const decisionBindingFields = ["actingCredentialId", "effectiveScopeHash"] as const;
+const decisionCommonFields = [...decisionCoreFields, ...decisionBindingFields] as const;
+
 function validateDecisionValue(value: unknown): AccessDecision {
   const initial = record(value, [
     ...decisionCommonFields,
@@ -356,8 +358,34 @@ function validateDecisionValue(value: unknown): AccessDecision {
     ...delegatedBindingFields,
     "requiredApproverCapability",
     "unverifiedMetadata",
-  ], decisionCommonFields);
+  ], decisionCoreFields);
   const mode = authorityMode(initial.authorityMode);
+  const decisionOutcome = outcome(initial.outcome);
+  const decisionReason = reasonCode(initial.reasonCode);
+  const isUnboundDirectDenial = mode === "DIRECT" &&
+    !Object.hasOwn(initial, "actingCredentialId") &&
+    !Object.hasOwn(initial, "effectiveScopeHash") &&
+    !Object.hasOwn(initial, "credentialId");
+  if (isUnboundDirectDenial) {
+    record(value, decisionCoreFields);
+    if (decisionOutcome !== "DENY" || decisionReason !== "CREDENTIAL_MISSING") invalid();
+    if (initial.version !== 2) invalid();
+    return {
+      version: 2,
+      outcome: "DENY",
+      reasonCode: "CREDENTIAL_MISSING",
+      authorityMode: "DIRECT",
+      subjectId: identifier(initial.subjectId),
+      subjectType: principalType(initial.subjectType),
+      action: identifier(initial.action),
+      actionSensitivity: sensitivity(initial.actionSensitivity),
+      resourceId: identifier(initial.resourceId),
+      contextHash: hash(initial.contextHash),
+      policyId: identifier(initial.policyId),
+      policyVersion: hash(initial.policyVersion),
+      decidedAt: timestamp(initial.decidedAt),
+    };
+  }
   record(
     value,
     mode === "DIRECT"
@@ -371,8 +399,6 @@ function validateDecisionValue(value: unknown): AccessDecision {
     mode === "DIRECT" ? decisionCommonFields : [...decisionCommonFields, ...delegatedBindingFields],
   );
   if (initial.version !== 2) invalid();
-  const decisionOutcome = outcome(initial.outcome);
-  const decisionReason = reasonCode(initial.reasonCode);
   if (decisionOutcome === "ALLOW" && decisionReason !== "POLICY_ALLOW") invalid();
   if (decisionOutcome === "STEP_UP" && decisionReason !== "HUMAN_APPROVAL_REQUIRED") invalid();
   if (
@@ -712,6 +738,11 @@ function validateAuthorizationValue(value: unknown): StepUpAuthorization {
 }
 
 function assertReceiptMatchesDecision(receipt: SignedReceipt, decision: AccessDecision): void {
+  if (decision.actingCredentialId === undefined || decision.effectiveScopeHash === undefined) invalid();
+  assertReceiptMatchesBoundDecision(receipt, decision as BoundAccessDecision);
+}
+
+function assertReceiptMatchesBoundDecision(receipt: SignedReceipt, decision: BoundAccessDecision): void {
   const payload = receipt.payload;
   if (
     payload.authorityMode !== decision.authorityMode ||
@@ -791,9 +822,12 @@ export function validateEvaluationResponse(
 
 export function validateStepUpRequestResponse(
   value: unknown,
-): { readonly request: StepUpRequest } {
-  const item = record(value, ["request"]);
-  return { request: validateStepUpRequestValue(item.request) };
+): { readonly decisionLogId: string; readonly request: StepUpRequest } {
+  const item = record(value, ["decisionLogId", "request"]);
+  return {
+    decisionLogId: identifier(item.decisionLogId),
+    request: validateStepUpRequestValue(item.request),
+  };
 }
 
 const stepUpFailureCodes = new Set([
