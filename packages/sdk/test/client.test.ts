@@ -465,6 +465,20 @@ test("SDK rejects valid responses bound to a different requested authority recor
     expiresAt: staticCredential.expiresAt,
   }));
 
+  const credentialScopeClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      credential: { ...staticCredential, allowedResourceIds: ["record:other"] },
+    }, 201)),
+  });
+  await expectInvalidResponse(() => credentialScopeClient.issueCredential({
+    principal: human,
+    capabilities: staticCredential.capabilities,
+    allowedActions: staticCredential.allowedActions,
+    allowedResourceIds: staticCredential.allowedResourceIds,
+    expiresAt: staticCredential.expiresAt,
+  }));
+
   const delegate: Principal = { id: staticDelegation.delegateId, type: "AGENT", affiliations: [] };
   const delegationClient = new ZkycReferenceClient({
     baseUrl: "https://invalid.reference",
@@ -473,6 +487,23 @@ test("SDK rejects valid responses bound to a different requested authority recor
     }, 201)),
   });
   await expectInvalidResponse(() => delegationClient.issueDelegation({
+    grantor: human,
+    grantorCredential: staticCredential,
+    delegate,
+    policy: { id: staticDelegation.policyId, rules: [] },
+    capabilities: staticDelegation.capabilities,
+    allowedActions: staticDelegation.allowedActions,
+    allowedResourceIds: staticDelegation.allowedResourceIds,
+    expiresAt: staticDelegation.expiresAt,
+  }));
+
+  const delegationScopeClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      delegation: { ...staticDelegation, capabilities: ["records:write"] },
+    }, 201)),
+  });
+  await expectInvalidResponse(() => delegationScopeClient.issueDelegation({
     grantor: human,
     grantorCredential: staticCredential,
     delegate,

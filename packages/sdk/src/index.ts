@@ -504,6 +504,48 @@ function requireResponseCorrelation(condition: boolean): void {
   if (!condition) throw new InvalidProtocolResponse();
 }
 
+function compareAscii(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function sameCanonicalStrings(
+  responseValues: readonly string[],
+  requestValues: readonly string[],
+): boolean {
+  const normalized = [...requestValues].sort(compareAscii);
+  return new Set(normalized).size === normalized.length &&
+    responseValues.length === normalized.length &&
+    responseValues.every((value, index) => value === normalized[index]);
+}
+
+function sameCanonicalAffiliations(
+  responseValues: readonly Affiliation[],
+  requestValues: readonly Affiliation[],
+): boolean {
+  const normalized = [...requestValues].sort((left, right) =>
+    compareAscii(left.organizationId, right.organizationId) || compareAscii(left.role, right.role)
+  );
+  const keys = normalized.map(({ organizationId, role }) => `${organizationId}\u0000${role}`);
+  return new Set(keys).size === keys.length &&
+    responseValues.length === normalized.length &&
+    responseValues.every((value, index) =>
+      value.organizationId === normalized[index]?.organizationId &&
+      value.role === normalized[index]?.role
+    );
+}
+
+function sameUnverifiedMetadata(
+  responseValue: UnverifiedMetadata | undefined,
+  requestValue: UnverifiedMetadata | undefined,
+): boolean {
+  if (responseValue === undefined || requestValue === undefined) return responseValue === requestValue;
+  if (responseValue.zkPassProofId !== requestValue.zkPassProofId) return false;
+  const responseProofs = responseValue.contextualProofIds;
+  const requestProofs = requestValue.contextualProofIds;
+  if (responseProofs === undefined || requestProofs === undefined) return responseProofs === requestProofs;
+  return sameCanonicalStrings(responseProofs, requestProofs);
+}
+
 export class ZkycReferenceClient {
   readonly #baseUrl: URL;
   readonly #fetch: FetchLike;
@@ -594,7 +636,13 @@ export class ZkycReferenceClient {
       const response = validateCredentialResponse(value);
       requireResponseCorrelation(
         response.credential.principalId === input.principal.id &&
-        response.credential.principalType === input.principal.type,
+        response.credential.principalType === input.principal.type &&
+        sameCanonicalAffiliations(response.credential.affiliations, input.principal.affiliations) &&
+        sameCanonicalStrings(response.credential.capabilities, input.capabilities) &&
+        sameCanonicalStrings(response.credential.allowedActions, input.allowedActions) &&
+        sameCanonicalStrings(response.credential.allowedResourceIds, input.allowedResourceIds) &&
+        response.credential.expiresAt === input.expiresAt &&
+        sameUnverifiedMetadata(response.credential.unverifiedMetadata, input.unverifiedMetadata),
       );
       return response;
     }, "POST", input);
@@ -619,7 +667,11 @@ export class ZkycReferenceClient {
         delegation.grantorType === input.grantor.type &&
         delegation.delegateId === input.delegate.id &&
         delegation.delegateType === input.delegate.type &&
-        delegation.policyId === input.policy.id,
+        delegation.policyId === input.policy.id &&
+        sameCanonicalStrings(delegation.capabilities, input.capabilities) &&
+        sameCanonicalStrings(delegation.allowedActions, input.allowedActions) &&
+        sameCanonicalStrings(delegation.allowedResourceIds, input.allowedResourceIds) &&
+        delegation.expiresAt === input.expiresAt,
       );
       return response;
     }, "POST", input);
