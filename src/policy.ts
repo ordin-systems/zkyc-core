@@ -1,4 +1,4 @@
-import { sha256Version } from "./canonical.js";
+import { canonicalJson, sha256Version } from "./canonical.js";
 import {
   DomainValidationError,
   canonicalizeAffiliations,
@@ -39,6 +39,70 @@ export interface CreatePolicyInput {
     readonly effect: DecisionOutcome;
     readonly approverCapability?: string;
   }[];
+}
+
+/** Immutable service-configuration boundary for policies trusted by authority transitions. */
+export class PolicyRegistry {
+  readonly #policies = new Map<string, Policy>();
+
+  constructor(input: { readonly policies: readonly Policy[] }) {
+    const record = requireRecord(input, "policy registry input");
+    rejectUnknownKeys(record, ["policies"], "policy registry input");
+    if (!Array.isArray(record.policies)) {
+      throw new DomainValidationError("policy registry policies must be an array");
+    }
+    for (const [index, value] of record.policies.entries()) {
+      const policy = validateExactPolicy(value, `policy registry policies[${index}]`);
+      const key = PolicyRegistry.key(policy.id, policy.version);
+      if (this.#policies.has(key)) {
+        throw new DomainValidationError(
+          `policy registry cannot replace duplicate policy ${policy.id}@${policy.version}`,
+        );
+      }
+      this.#policies.set(key, policy);
+    }
+    Object.freeze(this);
+  }
+
+  private static key(id: string, version: string): string {
+    return `${id}\u0000${version}`;
+  }
+
+  resolve(idValue: unknown, versionValue: unknown): Policy | undefined {
+    try {
+      const id = validateIdentifier(idValue, "policy id");
+      if (typeof versionValue !== "string" || !/^sha256:[0-9a-f]{64}$/.test(versionValue)) {
+        return undefined;
+      }
+      return this.#policies.get(PolicyRegistry.key(id, versionValue));
+    } catch {
+      return undefined;
+    }
+  }
+
+  resolveExact(value: unknown): Policy | undefined {
+    try {
+      const policy = validateExactPolicy(value, "registered policy");
+      const registered = this.resolve(policy.id, policy.version);
+      return registered !== undefined && canonicalJson(registered) === canonicalJson(policy)
+        ? registered
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+export function validateExactPolicy(value: unknown, label = "policy"): Policy {
+  const record = requireRecord(value, label);
+  rejectUnknownKeys(record, ["id", "version", "rules", "defaultEffect"], label);
+  const policy = createPolicy({ id: record.id, rules: record.rules as never });
+  if (record.version !== policy.version || record.defaultEffect !== policy.defaultEffect) {
+    throw new DomainValidationError(
+      `${label} must have its exact content-derived version and default effect`,
+    );
+  }
+  return policy;
 }
 
 export function createPolicy(input: unknown): Policy {

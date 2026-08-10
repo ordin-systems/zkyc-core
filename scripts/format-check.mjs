@@ -1,7 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const includedRoots = ["src", "test", "fixtures", "scripts", "apps", "packages"];
 const rootFiles = ["package.json", "tsconfig.json", ".gitignore"];
 const textExtensions = new Set([".ts", ".tsx", ".mjs", ".js", ".json", ".css", ".html"]);

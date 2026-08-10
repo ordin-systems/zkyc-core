@@ -5,6 +5,12 @@ export class DomainValidationError extends Error {
   }
 }
 
+export enum PrincipalType {
+  HUMAN = "HUMAN",
+  ORGANIZATION = "ORGANIZATION",
+  AGENT = "AGENT",
+}
+
 export interface Affiliation {
   readonly organizationId: string;
   readonly role: string;
@@ -12,6 +18,7 @@ export interface Affiliation {
 
 export interface Principal {
   readonly id: string;
+  readonly type: PrincipalType;
   readonly affiliations: readonly Affiliation[];
 }
 
@@ -41,6 +48,21 @@ export const REASON_CODES = [
   "CREDENTIAL_EXPIRED",
   "CREDENTIAL_REVOKED",
   "CREDENTIAL_SUBJECT_MISMATCH",
+  "ACTION_OUTSIDE_CREDENTIAL_SCOPE",
+  "RESOURCE_OUTSIDE_CREDENTIAL_SCOPE",
+  "DELEGATION_MALFORMED",
+  "DELEGATION_UNKNOWN",
+  "DELEGATION_NOT_YET_VALID",
+  "DELEGATION_EXPIRED",
+  "DELEGATION_REVOKED",
+  "DELEGATION_POLICY_MISMATCH",
+  "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+  "DELEGATION_GRANTOR_MISMATCH",
+  "DELEGATION_DELEGATE_MISMATCH",
+  "DELEGATION_IDENTITIES_NOT_DISTINCT",
+  "ACTION_OUTSIDE_DELEGATION_SCOPE",
+  "RESOURCE_OUTSIDE_DELEGATION_SCOPE",
+  "INSUFFICIENT_DELEGATED_CAPABILITY",
   "INSUFFICIENT_CAPABILITY",
   "AFFILIATION_REQUIRED",
   "ACTION_NOT_PERMITTED",
@@ -88,6 +110,13 @@ export function validateAction(value: unknown, label = "action"): string {
   return validateIdentifier(value, label);
 }
 
+export function validatePrincipalType(value: unknown, label = "principal.type"): PrincipalType {
+  if (!Object.values(PrincipalType).includes(value as PrincipalType)) {
+    throw new DomainValidationError(`${label} is unsupported`);
+  }
+  return value as PrincipalType;
+}
+
 export function validateActionSensitivity(value: unknown, label = "actionSensitivity"): ActionSensitivity {
   if (!Object.values(ActionSensitivity).includes(value as ActionSensitivity)) {
     throw new DomainValidationError(`${label} is unsupported`);
@@ -113,6 +142,47 @@ export function validateTimestamp(value: unknown, label: string): string {
 
 export function timestampMillis(value: string): number {
   return new Date(value).getTime();
+}
+
+function canonicalizeIdentifiers(
+  value: unknown,
+  label: string,
+  validator: (entry: unknown, entryLabel: string) => string,
+  options: { requireNonEmpty?: boolean } = {},
+): readonly string[] {
+  if (!Array.isArray(value)) throw new DomainValidationError(`${label} must be an array`);
+  if (options.requireNonEmpty === true && value.length === 0) {
+    throw new DomainValidationError(`${label} must be non-empty`);
+  }
+  const identifiers = value.map((entry, index) => validator(entry, `${label}[${index}]`));
+  if (new Set(identifiers).size !== identifiers.length) {
+    throw new DomainValidationError(`${label} must be unique`);
+  }
+  return Object.freeze([...identifiers].sort());
+}
+
+export function canonicalizeCapabilities(
+  value: unknown,
+  label: string,
+  options: { requireNonEmpty?: boolean } = {},
+): readonly string[] {
+  return canonicalizeIdentifiers(value, label, validateCapability, options);
+}
+
+export function canonicalizeActions(
+  value: unknown,
+  label: string,
+  options: { requireNonEmpty?: boolean } = {},
+): readonly string[] {
+  return canonicalizeIdentifiers(value, label, validateAction, options);
+}
+
+export function canonicalizeResourceIds(
+  value: unknown,
+  label: string,
+  options: { requireNonEmpty?: boolean } = {},
+): readonly string[] {
+  return canonicalizeIdentifiers(value, label, validateIdentifier, options);
 }
 
 function affiliationKey(affiliation: Affiliation): string {
@@ -154,9 +224,10 @@ export function canonicalizeAffiliations(
 
 export function createPrincipal(input: unknown): Principal {
   const record = requireRecord(input, "principal");
-  rejectUnknownKeys(record, ["id", "affiliations"], "principal");
+  rejectUnknownKeys(record, ["id", "type", "affiliations"], "principal");
   return Object.freeze({
     id: validateIdentifier(record.id, "principal.id"),
+    type: validatePrincipalType(record.type),
     affiliations: canonicalizeAffiliations(record.affiliations, "principal.affiliations"),
   });
 }
@@ -169,16 +240,10 @@ export function validateUnverifiedMetadata(value: unknown): UnverifiedMetadata {
     result.zkPassProofId = validateIdentifier(record.zkPassProofId, "unverifiedMetadata.zkPassProofId");
   }
   if (record.contextualProofIds !== undefined) {
-    if (!Array.isArray(record.contextualProofIds)) {
-      throw new DomainValidationError("unverifiedMetadata.contextualProofIds must be an array");
-    }
-    const ids = record.contextualProofIds.map((id, index) =>
-      validateIdentifier(id, `unverifiedMetadata.contextualProofIds[${index}]`),
+    result.contextualProofIds = canonicalizeResourceIds(
+      record.contextualProofIds,
+      "unverifiedMetadata.contextualProofIds",
     );
-    if (new Set(ids).size !== ids.length) {
-      throw new DomainValidationError("unverifiedMetadata.contextualProofIds must be unique");
-    }
-    result.contextualProofIds = Object.freeze([...ids].sort());
   }
   return Object.freeze(result);
 }

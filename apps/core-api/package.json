@@ -1,6 +1,6 @@
 {
   "name": "@ordin/zkyc-core-api-reference",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Reference-only Hono transport adapter for the deterministic zKYC core",
   "license": "UNLICENSED",
@@ -19,7 +19,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "tsc && node --test dist/test/*.test.js",
-    "build": "tsc",
+    "build": "node ../../scripts/clean.mjs dist && tsc",
     "start": "node dist/src/server.js"
   },
   "dependencies": {
@@ -27,7 +27,7 @@
     "hono": "4.13.1"
   },
   "peerDependencies": {
-    "@ordin/zkyc-core-reference": "0.2.1"
+    "@ordin/zkyc-core-reference": "0.3.0"
   },
   "devDependencies": {
     "@types/node": "22.15.3",

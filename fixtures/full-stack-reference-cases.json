@@ -1,160 +1,2411 @@
-[
-  {
-    "name": "full-stack-allow",
-    "credential": {
-      "principal": {
-        "id": "principal:fixture-allow",
-        "affiliations": [
-          {
-            "organizationId": "organization:fixture",
-            "role": "member"
-          }
-        ]
-      },
-      "capabilities": [
-        "records:read"
-      ],
-      "expiresAt": "2026-06-01T01:00:00.000Z"
-    },
-    "evaluation": {
-      "action": "records:read",
-      "resourceId": "record:fixture-allow",
-      "actionContext": {
-        "fields": [
-          "status"
+{
+  "version": 1,
+  "transcripts": [
+    {
+      "name": "direct-allow-receipt-replay",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
         ],
-        "purpose": "fixture-review"
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:direct-allow-receipt-replay:1"
+          ],
+          "delegation": [],
+          "decision-log": [
+            "decision-log:fixture:direct-allow-receipt-replay:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": [
+            "receipt-nonce:fixture:direct-allow-receipt-replay:1"
+          ]
+        }
       },
-      "policy": {
-        "id": "policy:fixture-allow-v02",
-        "rules": [
-          {
-            "action": "records:read",
-            "actionSensitivity": "ROUTINE",
-            "requiredCapabilities": [
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "subject",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:direct-allow",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
               "records:read"
             ],
-            "requiredAffiliations": [
-              {
-                "organizationId": "organization:fixture",
-                "role": "member"
-              }
+            "allowedActions": [
+              "records:read"
             ],
-            "effect": "ALLOW"
-          }
-        ]
-      },
-      "issueReceipt": true,
-      "receiptExpiresAt": "2026-06-01T00:20:00.000Z"
-    },
-    "expected": {
-      "outcome": "ALLOW",
-      "reasonCode": "POLICY_ALLOW",
-      "hasReceipt": true
-    }
-  },
-  {
-    "name": "full-stack-deny",
-    "credential": {
-      "principal": {
-        "id": "principal:fixture-deny",
-        "affiliations": [
-          {
-            "organizationId": "organization:fixture",
-            "role": "member"
-          }
-        ]
-      },
-      "capabilities": [
-        "records:delete"
-      ],
-      "expiresAt": "2026-06-01T01:00:00.000Z"
-    },
-    "evaluation": {
-      "action": "records:delete",
-      "resourceId": "record:fixture-deny",
-      "actionContext": {
-        "reason": "fixture-cleanup"
-      },
-      "policy": {
-        "id": "policy:fixture-deny-v02",
-        "rules": [
-          {
-            "action": "records:delete",
-            "actionSensitivity": "CRITICAL",
-            "requiredCapabilities": [
-              "records:delete"
+            "allowedResourceIds": [
+              "record:fixture:one"
             ],
-            "requiredAffiliations": [
-              {
-                "organizationId": "organization:fixture",
-                "role": "member"
-              }
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "allowed",
+          "input": {
+            "authorityMode": "DIRECT",
+            "credential": "$subject",
+            "action": "records:read",
+            "resourceId": "record:fixture:one",
+            "actionContext": {
+              "purpose": "reference-fixture"
+            },
+            "policy": {
+              "id": "policy:fixture:direct-allow-receipt-replay",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": true,
+            "receiptExpiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "ALLOW",
+            "reasonCode": "POLICY_ALLOW"
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:01:00.000Z",
+          "input": {
+            "evaluation": "$allowed"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "POLICY_ALLOW",
+            "receiptState": "UNCONSUMED",
+            "verificationStatus": "ACTIVE",
+            "approvalStatus": "NOT_REQUIRED"
+          }
+        },
+        {
+          "op": "consumeReceipt",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "evaluation": "$allowed"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "RECEIPT_VALID",
+            "valid": true
+          }
+        },
+        {
+          "op": "consumeReceipt",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "evaluation": "$allowed"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "RECEIPT_REPLAYED",
+            "valid": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "explicit-deny",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:explicit-deny:1"
+          ],
+          "delegation": [],
+          "decision-log": [
+            "decision-log:fixture:explicit-deny:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "subject",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:deny",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:write"
             ],
-            "effect": "DENY"
+            "allowedActions": [
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
           }
-        ]
-      },
-      "issueReceipt": true,
-      "receiptExpiresAt": "2026-06-01T00:20:00.000Z"
-    },
-    "expected": {
-      "outcome": "DENY",
-      "reasonCode": "POLICY_DENY",
-      "hasReceipt": false
-    }
-  },
-  {
-    "name": "full-stack-step-up",
-    "credential": {
-      "principal": {
-        "id": "principal:fixture-step-up",
-        "affiliations": [
-          {
-            "organizationId": "organization:fixture",
-            "role": "member"
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "denied",
+          "input": {
+            "authorityMode": "DIRECT",
+            "credential": "$subject",
+            "action": "records:write",
+            "resourceId": "record:fixture:one",
+            "actionContext": {
+              "purpose": "reference-deny"
+            },
+            "policy": {
+              "id": "policy:fixture:explicit-deny",
+              "rules": [
+                {
+                  "action": "records:write",
+                  "actionSensitivity": "CRITICAL",
+                  "requiredCapabilities": [
+                    "records:write"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "DENY"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "DENY",
+            "reasonCode": "POLICY_DENY"
           }
-        ]
-      },
-      "capabilities": [
-        "records:export"
-      ],
-      "expiresAt": "2026-06-01T01:00:00.000Z"
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:01:00.000Z",
+          "input": {
+            "evaluation": "$denied"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "POLICY_DENY",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "ACTIVE",
+            "approvalStatus": "NOT_REQUIRED"
+          }
+        }
+      ]
     },
-    "evaluation": {
-      "action": "records:export",
-      "resourceId": "dataset:fixture-step-up",
-      "actionContext": {
-        "destination": "reviewer",
-        "rows": 25
+    {
+      "name": "direct-step-up-approval",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:direct-step-up-approval:1",
+            "credential:fixture:direct-step-up-approval:2"
+          ],
+          "delegation": [],
+          "decision-log": [
+            "decision-log:fixture:direct-step-up-approval:1"
+          ],
+          "step-up-request": [
+            "step-up-request:fixture:direct-step-up-approval:1"
+          ],
+          "receipt-nonce": []
+        }
       },
-      "policy": {
-        "id": "policy:fixture-step-up-v02",
-        "rules": [
-          {
-            "action": "records:export",
-            "actionSensitivity": "SENSITIVE",
-            "requiredCapabilities": [
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "subject",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:exporter",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
               "records:export"
             ],
-            "requiredAffiliations": [
-              {
-                "organizationId": "organization:fixture",
-                "role": "member"
-              }
+            "allowedActions": [
+              "records:export"
             ],
-            "effect": "STEP_UP",
-            "approverCapability": "approval:records-export"
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
           }
-        ]
-      },
-      "issueReceipt": true,
-      "receiptExpiresAt": "2026-06-01T00:20:00.000Z"
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "challenged",
+          "input": {
+            "authorityMode": "DIRECT",
+            "credential": "$subject",
+            "action": "records:export",
+            "resourceId": "record:fixture:one",
+            "actionContext": {
+              "purpose": "reference-step-up"
+            },
+            "policy": {
+              "id": "policy:fixture:direct-step-up-approval",
+              "rules": [
+                {
+                  "action": "records:export",
+                  "actionSensitivity": "SENSITIVE",
+                  "requiredCapabilities": [
+                    "records:export"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "STEP_UP",
+                  "approverCapability": "approval:records-export"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "STEP_UP",
+            "reasonCode": "HUMAN_APPROVAL_REQUIRED"
+          }
+        },
+        {
+          "op": "createStepUpRequest",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "request",
+          "input": {
+            "evaluation": "$challenged",
+            "expiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 201,
+            "approvalStatus": "PENDING",
+            "decisionLogId": "decision-log:fixture:direct-step-up-approval:1"
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:01:00.000Z",
+          "input": {
+            "evaluation": "$challenged"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "HUMAN_APPROVAL_REQUIRED",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "ACTIVE",
+            "approvalStatus": "PENDING"
+          }
+        },
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "approver",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:approver",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
+              "approval:records-export"
+            ],
+            "allowedActions": [
+              "step-up:resolve"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "resolveStepUp",
+          "at": "2026-06-01T00:02:00.000Z",
+          "as": "authorization",
+          "input": {
+            "request": "$request",
+            "resolution": "APPROVE",
+            "approverCredential": "$approver"
+          },
+          "expect": {
+            "status": 200,
+            "approvalStatus": "APPROVED"
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "evaluation": "$challenged"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "STEP_UP_APPROVED",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "ACTIVE",
+            "approvalStatus": "APPROVED"
+          }
+        },
+        {
+          "op": "consumeAuthorization",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "authorization": "$authorization"
+          },
+          "expect": {
+            "status": 200,
+            "authorized": true
+          }
+        },
+        {
+          "op": "consumeAuthorization",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "authorization": "$authorization"
+          },
+          "expect": {
+            "status": 200,
+            "authorized": false
+          }
+        }
+      ]
     },
-    "expected": {
-      "outcome": "STEP_UP",
-      "reasonCode": "HUMAN_APPROVAL_REQUIRED",
-      "hasReceipt": false
+    {
+      "name": "step-up-rejection",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:step-up-rejection:1",
+            "credential:fixture:step-up-rejection:2"
+          ],
+          "delegation": [],
+          "decision-log": [
+            "decision-log:fixture:step-up-rejection:1"
+          ],
+          "step-up-request": [
+            "step-up-request:fixture:step-up-rejection:1"
+          ],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "subject",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:reject-subject",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:export"
+            ],
+            "allowedActions": [
+              "records:export"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "challenged",
+          "input": {
+            "authorityMode": "DIRECT",
+            "credential": "$subject",
+            "action": "records:export",
+            "resourceId": "record:fixture:one",
+            "actionContext": {},
+            "policy": {
+              "id": "policy:fixture:step-up-rejection",
+              "rules": [
+                {
+                  "action": "records:export",
+                  "actionSensitivity": "SENSITIVE",
+                  "requiredCapabilities": [
+                    "records:export"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "STEP_UP",
+                  "approverCapability": "approval:records-export"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "STEP_UP",
+            "reasonCode": "HUMAN_APPROVAL_REQUIRED"
+          }
+        },
+        {
+          "op": "createStepUpRequest",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "request",
+          "input": {
+            "evaluation": "$challenged",
+            "expiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 201,
+            "approvalStatus": "PENDING",
+            "decisionLogId": "decision-log:fixture:step-up-rejection:1"
+          }
+        },
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "approver",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:reject-approver",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
+              "approval:records-export"
+            ],
+            "allowedActions": [
+              "step-up:resolve"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "resolveStepUp",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "request": "$request",
+            "resolution": "REJECT",
+            "approverCredential": "$approver"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "STEP_UP_REJECTED",
+            "approvalStatus": "REJECTED"
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "evaluation": "$challenged"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "STEP_UP_REJECTED",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "ACTIVE",
+            "approvalStatus": "REJECTED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "expired-credential",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:expired-credential:1"
+          ],
+          "delegation": [],
+          "decision-log": [
+            "decision-log:fixture:expired-credential:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "subject",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:expired",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T00:05:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:05:00.000Z",
+          "as": "expired",
+          "input": {
+            "authorityMode": "DIRECT",
+            "credential": "$subject",
+            "action": "records:read",
+            "resourceId": "record:fixture:one",
+            "actionContext": {},
+            "policy": {
+              "id": "policy:fixture:expired-credential",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "DENY",
+            "reasonCode": "CREDENTIAL_EXPIRED"
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:05:00.000Z",
+          "input": {
+            "evaluation": "$expired"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "CREDENTIAL_EXPIRED",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "EXPIRED",
+            "approvalStatus": "NOT_REQUIRED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "revoked-credential",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:revoked-credential:1"
+          ],
+          "delegation": [],
+          "decision-log": [
+            "decision-log:fixture:revoked-credential:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "subject",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:revoked",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "revokeCredential",
+          "at": "2026-06-01T00:01:00.000Z",
+          "input": {
+            "credential": "$subject",
+            "reason": "reference-fixture"
+          },
+          "expect": {
+            "status": 200,
+            "revoked": true
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:02:00.000Z",
+          "as": "revoked",
+          "input": {
+            "authorityMode": "DIRECT",
+            "credential": "$subject",
+            "action": "records:read",
+            "resourceId": "record:fixture:one",
+            "actionContext": {},
+            "policy": {
+              "id": "policy:fixture:revoked-credential",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "DENY",
+            "reasonCode": "CREDENTIAL_REVOKED"
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "evaluation": "$revoked"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "CREDENTIAL_REVOKED",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "REVOKED",
+            "approvalStatus": "NOT_REQUIRED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "delegated-allow-receipt",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:delegated-allow-receipt:1",
+            "credential:fixture:delegated-allow-receipt:2"
+          ],
+          "delegation": [
+            "delegation:fixture:delegated-allow-receipt:1"
+          ],
+          "decision-log": [
+            "decision-log:fixture:delegated-allow-receipt:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": [
+            "receipt-nonce:fixture:delegated-allow-receipt:1"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "grantor",
+          "input": {
+            "principal": {
+              "id": "organization:fixture:delegated-allow-receipt:grantor",
+              "type": "ORGANIZATION",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "delegate",
+          "input": {
+            "principal": {
+              "id": "agent:fixture:delegated-allow-receipt:delegate",
+              "type": "AGENT",
+              "affiliations": []
+            },
+            "capabilities": [
+              "identity:act"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueDelegation",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "delegation",
+          "input": {
+            "grantorCredential": "$grantor",
+            "delegateCredential": "$delegate",
+            "policy": {
+              "id": "policy:fixture:delegated-allow-receipt",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "capabilities": [
+              "records:read"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:02:00.000Z",
+          "as": "allowed",
+          "input": {
+            "authorityMode": "DELEGATED",
+            "delegateIdentityCredential": "$delegate",
+            "grantorCredential": "$grantor",
+            "delegation": "$delegation",
+            "action": "records:read",
+            "resourceId": "record:fixture:one",
+            "actionContext": {
+              "purpose": "delegated-reference"
+            },
+            "policy": {
+              "id": "policy:fixture:delegated-allow-receipt",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": true,
+            "receiptExpiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "ALLOW",
+            "reasonCode": "POLICY_ALLOW"
+          }
+        },
+        {
+          "op": "consumeReceipt",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "evaluation": "$allowed"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "RECEIPT_VALID",
+            "valid": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "active-delegation",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:active-delegation:1",
+            "credential:fixture:active-delegation:2"
+          ],
+          "delegation": [
+            "delegation:fixture:active-delegation:1"
+          ],
+          "decision-log": [
+            "decision-log:fixture:active-delegation:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "grantor",
+          "input": {
+            "principal": {
+              "id": "organization:fixture:active-delegation:grantor",
+              "type": "ORGANIZATION",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "delegate",
+          "input": {
+            "principal": {
+              "id": "agent:fixture:active-delegation:delegate",
+              "type": "AGENT",
+              "affiliations": []
+            },
+            "capabilities": [
+              "identity:act"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueDelegation",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "delegation",
+          "input": {
+            "grantorCredential": "$grantor",
+            "delegateCredential": "$delegate",
+            "policy": {
+              "id": "policy:fixture:active-delegation",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "capabilities": [
+              "records:read"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:02:00.000Z",
+          "as": "allowed",
+          "input": {
+            "authorityMode": "DELEGATED",
+            "delegateIdentityCredential": "$delegate",
+            "grantorCredential": "$grantor",
+            "delegation": "$delegation",
+            "action": "records:read",
+            "resourceId": "record:fixture:one",
+            "actionContext": {
+              "purpose": "delegated-reference"
+            },
+            "policy": {
+              "id": "policy:fixture:active-delegation",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "ALLOW",
+            "reasonCode": "POLICY_ALLOW"
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "evaluation": "$allowed"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "POLICY_ALLOW",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "ACTIVE",
+            "approvalStatus": "NOT_REQUIRED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "expired-delegation",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:expired-delegation:1",
+            "credential:fixture:expired-delegation:2"
+          ],
+          "delegation": [
+            "delegation:fixture:expired-delegation:1"
+          ],
+          "decision-log": [
+            "decision-log:fixture:expired-delegation:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "grantor",
+          "input": {
+            "principal": {
+              "id": "organization:fixture:expired-delegation:grantor",
+              "type": "ORGANIZATION",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "delegate",
+          "input": {
+            "principal": {
+              "id": "agent:fixture:expired-delegation:delegate",
+              "type": "AGENT",
+              "affiliations": []
+            },
+            "capabilities": [
+              "identity:act"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueDelegation",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "delegation",
+          "input": {
+            "grantorCredential": "$grantor",
+            "delegateCredential": "$delegate",
+            "policy": {
+              "id": "policy:fixture:expired-delegation",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "capabilities": [
+              "records:read"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T00:05:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:02:00.000Z",
+          "as": "allowed",
+          "input": {
+            "authorityMode": "DELEGATED",
+            "delegateIdentityCredential": "$delegate",
+            "grantorCredential": "$grantor",
+            "delegation": "$delegation",
+            "action": "records:read",
+            "resourceId": "record:fixture:one",
+            "actionContext": {
+              "purpose": "delegated-reference"
+            },
+            "policy": {
+              "id": "policy:fixture:expired-delegation",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "ALLOW",
+            "reasonCode": "POLICY_ALLOW"
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:05:00.000Z",
+          "input": {
+            "evaluation": "$allowed"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "DELEGATION_EXPIRED",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "EXPIRED",
+            "approvalStatus": "NOT_REQUIRED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "revoked-delegation",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:revoked-delegation:1",
+            "credential:fixture:revoked-delegation:2"
+          ],
+          "delegation": [
+            "delegation:fixture:revoked-delegation:1"
+          ],
+          "decision-log": [
+            "decision-log:fixture:revoked-delegation:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "grantor",
+          "input": {
+            "principal": {
+              "id": "organization:fixture:revoked-delegation:grantor",
+              "type": "ORGANIZATION",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "delegate",
+          "input": {
+            "principal": {
+              "id": "agent:fixture:revoked-delegation:delegate",
+              "type": "AGENT",
+              "affiliations": []
+            },
+            "capabilities": [
+              "identity:act"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueDelegation",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "delegation",
+          "input": {
+            "grantorCredential": "$grantor",
+            "delegateCredential": "$delegate",
+            "policy": {
+              "id": "policy:fixture:revoked-delegation",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "capabilities": [
+              "records:read"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:02:00.000Z",
+          "as": "allowed",
+          "input": {
+            "authorityMode": "DELEGATED",
+            "delegateIdentityCredential": "$delegate",
+            "grantorCredential": "$grantor",
+            "delegation": "$delegation",
+            "action": "records:read",
+            "resourceId": "record:fixture:one",
+            "actionContext": {
+              "purpose": "delegated-reference"
+            },
+            "policy": {
+              "id": "policy:fixture:revoked-delegation",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "ALLOW",
+            "reasonCode": "POLICY_ALLOW"
+          }
+        },
+        {
+          "op": "revokeDelegation",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "delegation": "$delegation",
+            "reason": "reference-fixture"
+          },
+          "expect": {
+            "status": 200,
+            "revoked": true
+          }
+        },
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:02:00.000Z",
+          "input": {
+            "evaluation": "$allowed"
+          },
+          "expect": {
+            "status": 200,
+            "reasonCode": "DELEGATION_REVOKED",
+            "receiptState": "NOT_ISSUED",
+            "verificationStatus": "REVOKED",
+            "approvalStatus": "NOT_REQUIRED"
+          }
+        }
+      ]
+    },
+    {
+      "name": "credential-action-scope-mismatch",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:credential-action-scope-mismatch:1"
+          ],
+          "delegation": [],
+          "decision-log": [
+            "decision-log:fixture:credential-action-scope-mismatch:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "subject",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:credential-action-scope-mismatch",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "denied",
+          "input": {
+            "authorityMode": "DIRECT",
+            "credential": "$subject",
+            "action": "records:write",
+            "resourceId": "record:fixture:one",
+            "actionContext": {},
+            "policy": {
+              "id": "policy:fixture:credential-action-scope-mismatch",
+              "rules": [
+                {
+                  "action": "records:write",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:write"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "DENY",
+            "reasonCode": "ACTION_OUTSIDE_CREDENTIAL_SCOPE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "credential-resource-scope-mismatch",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:credential-resource-scope-mismatch:1"
+          ],
+          "delegation": [],
+          "decision-log": [
+            "decision-log:fixture:credential-resource-scope-mismatch:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "subject",
+          "input": {
+            "principal": {
+              "id": "principal:fixture:credential-resource-scope-mismatch",
+              "type": "HUMAN",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "denied",
+          "input": {
+            "authorityMode": "DIRECT",
+            "credential": "$subject",
+            "action": "records:read",
+            "resourceId": "record:fixture:two",
+            "actionContext": {},
+            "policy": {
+              "id": "policy:fixture:credential-resource-scope-mismatch",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "DENY",
+            "reasonCode": "RESOURCE_OUTSIDE_CREDENTIAL_SCOPE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "delegation-action-scope-mismatch",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:delegation-action-scope-mismatch:1",
+            "credential:fixture:delegation-action-scope-mismatch:2"
+          ],
+          "delegation": [
+            "delegation:fixture:delegation-action-scope-mismatch:1"
+          ],
+          "decision-log": [
+            "decision-log:fixture:delegation-action-scope-mismatch:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "grantor",
+          "input": {
+            "principal": {
+              "id": "organization:fixture:delegation-action-scope-mismatch:grantor",
+              "type": "ORGANIZATION",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "delegate",
+          "input": {
+            "principal": {
+              "id": "agent:fixture:delegation-action-scope-mismatch:delegate",
+              "type": "AGENT",
+              "affiliations": []
+            },
+            "capabilities": [
+              "identity:act"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueDelegation",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "delegation",
+          "input": {
+            "grantorCredential": "$grantor",
+            "delegateCredential": "$delegate",
+            "policy": {
+              "id": "policy:fixture:delegation-action-scope-mismatch",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                },
+                {
+                  "action": "records:write",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:write"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "capabilities": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:02:00.000Z",
+          "as": "denied",
+          "input": {
+            "authorityMode": "DELEGATED",
+            "delegateIdentityCredential": "$delegate",
+            "grantorCredential": "$grantor",
+            "delegation": "$delegation",
+            "action": "records:write",
+            "resourceId": "record:fixture:one",
+            "actionContext": {
+              "purpose": "delegated-reference"
+            },
+            "policy": {
+              "id": "policy:fixture:delegation-action-scope-mismatch",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                },
+                {
+                  "action": "records:write",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:write"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "DENY",
+            "reasonCode": "ACTION_OUTSIDE_DELEGATION_SCOPE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "delegation-resource-scope-mismatch",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [
+            "credential:fixture:delegation-resource-scope-mismatch:1",
+            "credential:fixture:delegation-resource-scope-mismatch:2"
+          ],
+          "delegation": [
+            "delegation:fixture:delegation-resource-scope-mismatch:1"
+          ],
+          "decision-log": [
+            "decision-log:fixture:delegation-resource-scope-mismatch:1"
+          ],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "grantor",
+          "input": {
+            "principal": {
+              "id": "organization:fixture:delegation-resource-scope-mismatch:grantor",
+              "type": "ORGANIZATION",
+              "affiliations": []
+            },
+            "capabilities": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueCredential",
+          "at": "2026-06-01T00:00:00.000Z",
+          "as": "delegate",
+          "input": {
+            "principal": {
+              "id": "agent:fixture:delegation-resource-scope-mismatch:delegate",
+              "type": "AGENT",
+              "affiliations": []
+            },
+            "capabilities": [
+              "identity:act"
+            ],
+            "allowedActions": [
+              "records:read",
+              "records:write"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one",
+              "record:fixture:two"
+            ],
+            "expiresAt": "2026-06-01T01:00:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "issueDelegation",
+          "at": "2026-06-01T00:01:00.000Z",
+          "as": "delegation",
+          "input": {
+            "grantorCredential": "$grantor",
+            "delegateCredential": "$delegate",
+            "policy": {
+              "id": "policy:fixture:delegation-resource-scope-mismatch",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "capabilities": [
+              "records:read"
+            ],
+            "allowedActions": [
+              "records:read"
+            ],
+            "allowedResourceIds": [
+              "record:fixture:one"
+            ],
+            "expiresAt": "2026-06-01T00:20:00.000Z"
+          },
+          "expect": {
+            "status": 201
+          }
+        },
+        {
+          "op": "evaluate",
+          "at": "2026-06-01T00:02:00.000Z",
+          "as": "denied",
+          "input": {
+            "authorityMode": "DELEGATED",
+            "delegateIdentityCredential": "$delegate",
+            "grantorCredential": "$grantor",
+            "delegation": "$delegation",
+            "action": "records:read",
+            "resourceId": "record:fixture:two",
+            "actionContext": {
+              "purpose": "delegated-reference"
+            },
+            "policy": {
+              "id": "policy:fixture:delegation-resource-scope-mismatch",
+              "rules": [
+                {
+                  "action": "records:read",
+                  "actionSensitivity": "ROUTINE",
+                  "requiredCapabilities": [
+                    "records:read"
+                  ],
+                  "requiredAffiliations": [],
+                  "effect": "ALLOW"
+                }
+              ]
+            },
+            "issueReceipt": false
+          },
+          "expect": {
+            "status": 200,
+            "outcome": "DENY",
+            "reasonCode": "RESOURCE_OUTSIDE_DELEGATION_SCOPE"
+          }
+        }
+      ]
+    },
+    {
+      "name": "missing-onboarding-view",
+      "fixed": {
+        "initialClock": "2026-06-01T00:00:00.000Z",
+        "referenceKeyBytes": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "idsByKind": {
+          "credential": [],
+          "delegation": [],
+          "decision-log": [],
+          "step-up-request": [],
+          "receipt-nonce": []
+        }
+      },
+      "steps": [
+        {
+          "op": "getOnboardingView",
+          "at": "2026-06-01T00:00:00.000Z",
+          "input": {
+            "decisionLogId": "decision-log:fixture:missing"
+          },
+          "expect": {
+            "status": 404,
+            "reasonCode": "DECISION_NOT_FOUND"
+          }
+        }
+      ]
     }
-  }
-]
+  ]
+}

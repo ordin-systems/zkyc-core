@@ -4,7 +4,11 @@ import {
   ZkycReferenceClient,
   ZkycTransportError,
   type AccessDecision,
+  type BoundAccessDecision,
+  type CapabilityDelegation,
+  type Credential,
   type DecisionLogEntry,
+  type ReceiptExpectedBinding,
   type SignedReceipt,
   type StepUpAuthorization,
   type StepUpRequest,
@@ -18,6 +22,7 @@ const defaultClient = new ZkycReferenceClient({
 export type CockpitClient = Pick<
   ZkycReferenceClient,
   | "issueCredential"
+  | "issueDelegation"
   | "evaluate"
   | "createStepUpRequest"
   | "resolveStepUpRequest"
@@ -30,6 +35,14 @@ export interface AppProps {
   readonly client?: CockpitClient;
 }
 
+interface PresentedAuthority {
+  readonly actingCredential: Credential;
+  readonly effectiveCapabilities: readonly string[];
+  readonly effectiveActions: readonly string[];
+  readonly effectiveResources: readonly string[];
+  readonly delegation?: CapabilityDelegation;
+}
+
 function future(minutes: number): string {
   return new Date(Date.now() + minutes * 60_000).toISOString();
 }
@@ -40,12 +53,52 @@ function errorMessage(error: unknown): string {
   return "The reference flow failed closed.";
 }
 
+function isBoundDecision(decision: AccessDecision): decision is BoundAccessDecision {
+  return decision.actingCredentialId !== undefined && decision.effectiveScopeHash !== undefined;
+}
+
+function receiptExpectedBinding(decision: AccessDecision): ReceiptExpectedBinding {
+  if (!isBoundDecision(decision)) throw new Error("receipt decision is missing authority bindings");
+  const common = {
+    authorityMode: decision.authorityMode,
+    subjectId: decision.subjectId,
+    subjectType: decision.subjectType,
+    actingCredentialId: decision.actingCredentialId,
+    effectiveScopeHash: decision.effectiveScopeHash,
+    action: decision.action,
+    actionSensitivity: decision.actionSensitivity,
+    resourceId: decision.resourceId,
+    contextHash: decision.contextHash,
+    policyId: decision.policyId,
+    policyVersion: decision.policyVersion,
+    decision: decision.outcome,
+    reasonCode: decision.reasonCode,
+    ...(decision.requiredApproverCapability === undefined
+      ? {}
+      : { requiredApproverCapability: decision.requiredApproverCapability }),
+  };
+  if (decision.authorityMode === "DIRECT") {
+    if (decision.credentialId === undefined) throw new Error("direct decision is missing credentialId");
+    return { ...common, authorityMode: "DIRECT", credentialId: decision.credentialId };
+  }
+  return {
+    ...common,
+    authorityMode: "DELEGATED",
+    grantorId: decision.grantorId,
+    grantorType: decision.grantorType,
+    grantorCredentialId: decision.grantorCredentialId,
+    delegationId: decision.delegationId,
+    delegationBindingHash: decision.delegationBindingHash,
+  };
+}
+
 export function App({ client = defaultClient }: AppProps = {}) {
   const [scenarioId, setScenarioId] = useState(scenarios[0]?.id ?? "");
   const [decision, setDecision] = useState<AccessDecision | null>(null);
   const [receipt, setReceipt] = useState<SignedReceipt | null>(null);
   const [stepUpRequest, setStepUpRequest] = useState<StepUpRequest | null>(null);
   const [authorization, setAuthorization] = useState<StepUpAuthorization | null>(null);
+  const [presentedAuthority, setPresentedAuthority] = useState<PresentedAuthority | null>(null);
   const [resolutionReason, setResolutionReason] = useState<string | null>(null);
   const [consumption, setConsumption] = useState<string | null>(null);
   const [entries, setEntries] = useState<readonly DecisionLogEntry[]>([]);
@@ -82,24 +135,87 @@ export function App({ client = defaultClient }: AppProps = {}) {
     setReceipt(null);
     setStepUpRequest(null);
     setAuthorization(null);
+    setPresentedAuthority(null);
     setResolutionReason(null);
     setConsumption(null);
     try {
-      const issued = await client.issueCredential({
-        principal: scenario.principal,
-        capabilities: scenario.capabilities,
-        expiresAt: future(60),
-      });
-      const evaluated = await client.evaluate({
-        principal: scenario.principal,
-        credential: issued.credential,
-        action: scenario.action,
-        resourceId: scenario.resourceId,
-        actionContext: scenario.actionContext,
-        policy: scenario.policy,
-        issueReceipt: true,
-        receiptExpiresAt: future(15),
-      });
+      let evaluated: Awaited<ReturnType<CockpitClient["evaluate"]>>;
+      if (scenario.authorityMode === "DIRECT") {
+        const issued = await client.issueCredential({
+          principal: scenario.principal,
+          capabilities: scenario.capabilities,
+          allowedActions: scenario.allowedActions,
+          allowedResourceIds: scenario.allowedResourceIds,
+          expiresAt: future(60),
+        });
+        evaluated = await client.evaluate({
+          authorityMode: "DIRECT",
+          principal: scenario.principal,
+          credential: issued.credential,
+          action: scenario.action,
+          resourceId: scenario.resourceId,
+          actionContext: scenario.actionContext,
+          policy: scenario.policy,
+          issueReceipt: true,
+          receiptExpiresAt: future(15),
+        });
+        setPresentedAuthority({
+          actingCredential: issued.credential,
+          effectiveCapabilities: issued.credential.capabilities,
+          effectiveActions: issued.credential.allowedActions,
+          effectiveResources: issued.credential.allowedResourceIds,
+        });
+      } else {
+        const grantor = {
+          id: "organization:reference-grantor",
+          type: "ORGANIZATION",
+          affiliations: [],
+        } as const;
+        const { credential: grantorCredential } = await client.issueCredential({
+          principal: grantor,
+          capabilities: ["records:read", "records:write"],
+          allowedActions: ["records:read", "records:write"],
+          allowedResourceIds: [scenario.resourceId, "record:reference-reserve"],
+          expiresAt: future(60),
+        });
+        const { credential: delegateIdentityCredential } = await client.issueCredential({
+          principal: scenario.principal,
+          capabilities: ["identity:present"],
+          allowedActions: ["identity:present"],
+          allowedResourceIds: [scenario.principal.id],
+          expiresAt: future(60),
+        });
+        const { delegation } = await client.issueDelegation({
+          grantor,
+          grantorCredential,
+          delegate: scenario.principal,
+          policy: scenario.policy,
+          capabilities: scenario.capabilities,
+          allowedActions: scenario.allowedActions,
+          allowedResourceIds: scenario.allowedResourceIds,
+          expiresAt: future(30),
+        });
+        evaluated = await client.evaluate({
+          authorityMode: "DELEGATED",
+          principal: scenario.principal,
+          delegateIdentityCredential,
+          grantorCredential,
+          delegation,
+          action: scenario.action,
+          resourceId: scenario.resourceId,
+          actionContext: scenario.actionContext,
+          policy: scenario.policy,
+          issueReceipt: true,
+          receiptExpiresAt: future(15),
+        });
+        setPresentedAuthority({
+          actingCredential: delegateIdentityCredential,
+          effectiveCapabilities: delegation.capabilities,
+          effectiveActions: delegation.allowedActions,
+          effectiveResources: delegation.allowedResourceIds,
+          delegation,
+        });
+      }
       setDecision(evaluated.decision);
       setReceipt(evaluated.receipt ?? null);
       if (evaluated.decision.outcome === "STEP_UP") {
@@ -125,11 +241,14 @@ export function App({ client = defaultClient }: AppProps = {}) {
     try {
       const approver = {
         id: "principal:reference-approver",
+        type: "HUMAN",
         affiliations: [{ organizationId: "organization:reference", role: "reviewer" }],
       } as const;
       const issued = await client.issueCredential({
         principal: approver,
         capabilities: [stepUpRequest.requiredApproverCapability],
+        allowedActions: ["step-up:resolve"],
+        allowedResourceIds: [stepUpRequest.resourceId],
         expiresAt: future(60),
       });
       const resolved = await client.resolveStepUpRequest(stepUpRequest.id, {
@@ -152,39 +271,52 @@ export function App({ client = defaultClient }: AppProps = {}) {
   }
 
   async function consumeAuthority() {
-    if (decision === null || decision.credentialId === undefined) return;
+    if (decision === null) return;
     setBusy("consume");
     setError(null);
     try {
       if (receipt !== null) {
         const result = await client.consumeReceipt({
           receipt,
-          expected: {
-            subjectId: decision.subjectId,
-            action: decision.action,
-            actionSensitivity: decision.actionSensitivity,
-            resourceId: decision.resourceId,
-            contextHash: decision.contextHash,
-            policyId: decision.policyId,
-            policyVersion: decision.policyVersion,
-            credentialId: decision.credentialId,
-            decision: decision.outcome,
-            reasonCode: decision.reasonCode,
-          },
+          expected: receiptExpectedBinding(decision),
         });
         setConsumption(result.reasonCode);
       } else if (authorization !== null) {
-        const result = await client.consumeStepUpAuthorization({
+        const common = {
           authorization,
-          subjectId: decision.subjectId,
-          action: decision.action,
-          actionSensitivity: decision.actionSensitivity,
-          resourceId: decision.resourceId,
-          contextHash: decision.contextHash,
-          policyId: decision.policyId,
-          policyVersion: decision.policyVersion,
-          credentialId: decision.credentialId,
-        });
+          requestId: authorization.requestId,
+          authorityMode: authorization.authorityMode,
+          subjectId: authorization.subjectId,
+          subjectType: authorization.subjectType,
+          actingCredentialId: authorization.actingCredentialId,
+          effectiveScopeHash: authorization.effectiveScopeHash,
+          action: authorization.action,
+          actionSensitivity: authorization.actionSensitivity,
+          resourceId: authorization.resourceId,
+          contextHash: authorization.contextHash,
+          policyId: authorization.policyId,
+          policyVersion: authorization.policyVersion,
+          requiredApproverCapability: authorization.requiredApproverCapability,
+          approvedBy: authorization.approvedBy,
+          approvedByType: authorization.approvedByType,
+          approverCredentialId: authorization.approverCredentialId,
+        };
+        const input = authorization.authorityMode === "DIRECT"
+          ? {
+              ...common,
+              authorityMode: "DIRECT" as const,
+              credentialId: authorization.credentialId ?? authorization.actingCredentialId,
+            }
+          : {
+              ...common,
+              authorityMode: "DELEGATED" as const,
+              grantorId: authorization.grantorId,
+              grantorType: authorization.grantorType,
+              grantorCredentialId: authorization.grantorCredentialId,
+              delegationId: authorization.delegationId,
+              delegationBindingHash: authorization.delegationBindingHash,
+            };
+        const result = await client.consumeStepUpAuthorization(input);
         setConsumption(result.authorized ? "STEP_UP_AUTHORIZATION_CONSUMED" : "STEP_UP_AUTHORIZATION_REJECTED");
       }
     } catch (caught) {
@@ -251,12 +383,32 @@ export function App({ client = defaultClient }: AppProps = {}) {
               <span className={`outcome large ${decision.outcome.toLowerCase()}`}>{decision.outcome}</span>
               <dl>
                 <div><dt>Reason</dt><dd>{decision.reasonCode}</dd></div>
+                <div><dt>Principal type</dt><dd>{decision.subjectType}</dd></div>
+                <div><dt>Authority mode</dt><dd>{decision.authorityMode}</dd></div>
+                <div><dt>Acting credential</dt><dd>{decision.actingCredentialId}</dd></div>
+                <div><dt>Effective scope</dt><dd className="hash">{decision.effectiveScopeHash}</dd></div>
                 <div><dt>Action</dt><dd>{decision.action}</dd></div>
                 <div><dt>Tier</dt><dd>{decision.actionSensitivity}</dd></div>
                 <div><dt>Resource</dt><dd>{decision.resourceId}</dd></div>
                 <div><dt>Policy</dt><dd>{decision.policyId}</dd></div>
                 <div><dt>Context</dt><dd className="hash">{decision.contextHash}</dd></div>
               </dl>
+              {presentedAuthority === null ? null : (
+                <div className="scope-summary" aria-label="Bound authority scope">
+                  <h3>Bound scope</h3>
+                  <p><strong>Capabilities:</strong> {presentedAuthority.effectiveCapabilities.join(", ")}</p>
+                  <p><strong>Actions:</strong> {presentedAuthority.effectiveActions.join(", ")}</p>
+                  <p><strong>Resources:</strong> {presentedAuthority.effectiveResources.join(", ")}</p>
+                  {presentedAuthority.delegation === undefined ? null : (
+                    <div aria-label="Delegation binding">
+                      <h3>Delegation binding</h3>
+                      <p><strong>Grantor:</strong> {presentedAuthority.delegation.grantorId} / {presentedAuthority.delegation.grantorType}</p>
+                      <p><strong>Delegation:</strong> {presentedAuthority.delegation.id}</p>
+                      <p className="hash"><strong>Binding:</strong> {presentedAuthority.delegation.delegationBindingHash}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </section>

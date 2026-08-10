@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createReferenceApp, type ReferenceIdKind } from "./app.js";
+import { localReferencePolicyCatalog } from "./reference-policy-catalog.js";
 import { startLoopbackReferenceServer } from "./server-runtime.js";
 
 const secret = process.env.ZKYC_RECEIPT_HMAC_KEY;
@@ -16,6 +17,7 @@ const app = createReferenceApp({
   clock: () => new Date().toISOString(),
   idFactory: (kind: ReferenceIdKind) => `${kind}:${randomUUID()}`,
   receiptHmacKey: new TextEncoder().encode(secret),
+  trustedPolicies: localReferencePolicyCatalog,
   issuerId: process.env.ZKYC_ISSUER_ID ?? "issuer:reference-local",
 });
 

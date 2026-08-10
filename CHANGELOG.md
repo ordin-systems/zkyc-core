@@ -1,6 +1,58 @@
 # Changelog
 
-All notable changes to the bounded public reference implementation are recorded here.
+All notable changes to the bounded reference implementation are recorded here. Candidate entries are not release records.
+
+## 0.3.0 candidate — unreleased
+
+### Added
+
+- exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types bound through credential v2, decisions, step-up artifacts, and receipt v2;
+- explicit `DIRECT` and `DELEGATED` evaluation modes;
+- one-hop capability delegations binding grantor, delegate, grantor credential, policy ID/version, validity window, and attenuated capability/action/resource scope;
+- separate delegate identity and grantor credentials, with no transfer of grantor affiliations;
+- delegation issuance, revocation, evaluation, onboarding, step-up, receipt, and SDK/API contracts;
+- policy/expiry/revocation revalidation across delegated evaluation, step-up transitions, receipt consumption, and retained onboarding views;
+- human-only step-up resolution requiring the exact approver capability, `step-up:resolve` action scope, and requested resource scope;
+- authority-bound receipt v2 and step-up v2 artifacts, including acting/grantor/delegation bindings and one-time consumption;
+- strict SDK runtime validation for exact success and error schemas;
+- executable versioned full-stack lifecycle transcripts run through both API and SDK;
+- a dedicated zkYA onboarding reference UI and retained `/zkya/onboarding-views/:decisionLogId` projection;
+- v0.3 authority bindings in the existing operator UI;
+- a real local Chromium smoke test through the built zkYA UI, SDK, and loopback HTTP API;
+- current retained step-up eligibility derived from live subject, delegation, approver, expiry, revocation, and one-time-consumption state;
+- SDK request/response exact typed-subject/affiliation identity, canonical scope-hash, context-hash, exact-policy-version, policy-outcome, authority-satisfaction and decision-time validity, grantor-scope attenuation, delegation-binding, receipt-presence/expiry, resolution-intent, and requested-expiry correlation;
+- immutable startup policy registries and exact live-policy re-evaluation for evaluation, step-up, and receipt transitions;
+- fail-closed rejection of self-delegation and any reuse of the acting credential in the grantor lane;
+- strict SDK handling for legitimate unbound credential-missing denials and decision-log-correlated step-up creation;
+- clean-build, path-portable, fail-closed scanner/archive/package verification with blank-consumer imports and installed-API probing.
+
+### Independent-review remediation state
+
+- the defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES` for step-up creation semantics and receipt-template counts;
+- the parallel specification review timed out without a verdict after independently reproducing forged SDK scope, policy-version, and policy-outcome acceptance;
+- executable baseline `20fa75cf847e064e84f07f6426908412a5811be6` remediates all reproduced findings and passes the local integrated verifier;
+- at superseded candidate `5749f77495bb075871fed0e80eff3ca89e2f9d9f`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` after proving an unsatisfied-capability forged `ALLOW`; this baseline closes that finding and adjacent affiliation/scope/decision-time/receipt/resolution correlations;
+- at superseded candidate `db759f18ff727e59e70f472b193d88cd404e61fe`, both reviewers returned `REQUEST_CHANGES` after independently proving grantor-scope escalation, and the specification reviewer additionally proved direct principal/credential affiliation substitution; this baseline mirrors core exact-subject and delegation-attenuation invariants in SDK issuance and evaluation correlation;
+- at superseded candidate `ab67604a67263af316a5dd78643435e3045809fb`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` after proving that core delegation issuance accepted caller-substituted grantor affiliations; this baseline requires exact credential-bound grantor affiliations in core and API issuance as well as SDK correlation;
+- at superseded candidate `7816c406a57eb17a85f3f275b4173550c1e725dc`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` because Hono collapsed the correct core `DELEGATION_GRANTOR_MISMATCH` into generic `INVALID_REQUEST`; this baseline preserves the stable delegation domain code through API and SDK transport;
+- no independent `PASS` is claimed for this successor until new exact-head reviews complete.
+
+### Verification inventory at executable baseline `20fa75cf847e064e84f07f6426908412a5811be6`
+
+- core tests: 46;
+- API/server tests: 13;
+- SDK tests: 12;
+- operator UI tests: 3;
+- zkYA component tests: 9;
+- scanner regression tests: 9;
+- release-tooling regression tests: 7;
+- Chromium E2E tests: 1.
+
+Format, security, typecheck, build, package, and dependency-audit gates remain distinct checks and are not included as tests.
+
+### Candidate boundary
+
+This entry describes an integrated local reference candidate. It does not claim a merge, tag, release, publication, npm package, current-head CI result, immutable v0.3 artifact, independent review, archive hash, or logged-out public readback.
 
 ## 0.2.1-full-stack-reference — 2026-08-09
 
@@ -12,7 +64,7 @@ All notable changes to the bounded public reference implementation are recorded 
 
 ### Lineage
 
-- `v0.2.0-full-stack-reference` and `v0.1.0-reference` remain immutable and unchanged.
+- historical `v0.2.0-full-stack-reference` and `v0.1.0-reference` remain unchanged.
 
 ## 0.2.0-full-stack-reference — 2026-08-09
 
@@ -20,38 +72,24 @@ All notable changes to the bounded public reference implementation are recorded 
 
 - sanitized Hono reference API around the deterministic core;
 - retained evaluator-result provenance for receipt issuance and step-up creation;
-- credential, evaluation, step-up, receipt-consumption and decision-log routes;
+- credential, evaluation, step-up, receipt-consumption, and decision-log routes;
 - browser-compatible typed TypeScript SDK and contract tests;
-- React/Vite reviewer cockpit for `ALLOW`, `DENY`, `STEP_UP`, approval/rejection and one-time consumption;
-- automated Vitest/jsdom cockpit interactions covering approval, rejection, consumption and replay rejection;
-- deterministic full-stack fixtures;
-- API adversarial tests for malformed input, unknown fields, decision injection, prototype-control fields, receipt tampering, redirect mismatch and replay;
-- workspace-wide format/security scans, strict typechecks, tests and CI-backed builds.
-
-### Corrected
-
-- canonical JSON normalization now uses a null-prototype accumulator so an own `__proto__` property is preserved as data rather than colliding with an empty object;
-- added core and API regressions proving distinct canonical context hashes.
+- React/Vite reviewer cockpit for decision, resolution, and consumption states;
+- deterministic full-stack fixtures and adversarial API tests;
+- workspace format/security checks, strict typechecks, tests, and builds.
 
 ### Boundaries
 
-- all API state and reason-coded logs remain in memory;
-- network authentication, tenancy, rate limiting and production storage are intentionally absent;
-- the UI cannot execute protected actions;
-- the project remains `UNLICENSED` / all rights reserved.
+- API state and reason-coded logs are in memory;
+- network authentication, tenancy, rate limiting, production storage, and protected-action execution are absent;
+- the project is `UNLICENSED` / all rights reserved.
 
 ## 0.1.0-reference — 2026-08-08
 
 ### Added
 
-- deterministic principal, credential, capability, permission and action-policy model;
-- credential issuance, expiry and revocation handling;
-- reason-coded `ALLOW`, `DENY` and `STEP_UP` outcomes;
+- deterministic principal, credential, capability, permission, and action-policy model;
+- credential validity/revocation handling and reason-coded decisions;
 - time-bounded human step-up lifecycle;
-- canonical HMAC-SHA256 receipts with timing-safe verification;
-- atomic one-time nonce-store contract and in-memory reference adapter;
-- negative-path and concurrency tests, deterministic fixtures and clean verification commands;
-- architecture, threat-model, provenance, authorship, limitations and reproducibility documentation;
-- GitHub Actions verification across supported Node versions.
-
-The immutable v0.1 release remains available as originally published. v0.2 is a successor release and does not rewrite it.
+- canonical HMAC-SHA256 receipts and atomic one-time nonce-store contract;
+- deterministic fixtures, verification commands, and architecture/evidence documentation.
