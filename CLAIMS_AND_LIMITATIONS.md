@@ -2,7 +2,7 @@
 
 ## Supported v0.3 candidate claims
 
-At executable baseline `1818222889f87bb7f5e331331d69a7be5fa24e2f`, the integrated local reference candidate supports these bounded claims:
+At executable baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`, the integrated local reference candidate supports these bounded claims:
 
 - exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
 - credential v2 binding of principal ID/type, credential-bound affiliations, capabilities, exact actions, exact resources, issuer, validity, and scope hash;
@@ -16,12 +16,13 @@ At executable baseline `1818222889f87bb7f5e331331d69a7be5fa24e2f`, the integrate
 - HMAC-SHA256 receipt v2 bound to mode, typed subject, acting credential, effective scope, action/resource/context, policy, outcome/reason, and delegated grant fields when applicable;
 - timing-safe verification and atomic one-time receipt/authorization consumption;
 - Hono reference API with retained evaluator provenance and current-state onboarding projections;
-- browser-compatible TypeScript SDK with strict exact-schema runtime validation;
+- browser-compatible TypeScript SDK with strict exact-schema runtime validation and request/response authority correlation;
 - operator and zkYA React/Vite reference UIs;
 - deterministic core fixtures plus versioned full-stack transcripts executed by API and SDK tests;
-- a real local Chromium test through the built zkYA UI, SDK, and loopback API.
+- a real local Chromium test through the built zkYA UI, SDK, and loopback API;
+- fail-closed publication/archive scanning and source-derived package allowlists exercised through blank-consumer imports and an installed API probe.
 
-Current behavioral counts are core 45, API/server 11, SDK 8, operator UI 3, zkYA component 9, scanner regression 1, and Chromium E2E 1. Typechecks, builds, formatting, security scanning, package verification, and dependency audit are checks rather than tests.
+Current behavioral counts are core 45, API/server 13, SDK 10, operator UI 3, zkYA component 9, scanner regression 7, release-tooling regression 6, and Chromium E2E 1. Typechecks, builds, formatting, security scanning, package verification, and dependency audit are checks rather than tests.
 
 ## Non-claims
 

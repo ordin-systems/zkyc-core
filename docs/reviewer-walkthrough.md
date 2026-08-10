@@ -19,23 +19,24 @@ npm run package:check
 npm audit --audit-level=high
 ```
 
-If Playwright Chromium is absent, run `npx playwright install chromium` separately after `npm ci --ignore-scripts` and before the browser gate. Installation is a prerequisite, not a passing test.
+If Playwright Chromium is absent, run `npx --no-install playwright install chromium` separately after `npm ci --ignore-scripts` and before the browser gate. Installation is a prerequisite, not a passing test.
 
 `npm run verify` composes the root gates. Do not count formatting, security, typecheck, build, package, or dependency audit as tests.
 
 ## 2. Confirm behavioral counts
 
-Expected at executable baseline `1818222889f87bb7f5e331331d69a7be5fa24e2f`:
+Expected at executable baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`:
 
 - core 45;
-- API/server 11;
-- SDK 8;
+- API/server 13;
+- SDK 10;
 - operator UI 3;
 - zkYA component 9;
-- scanner regression 1;
+- scanner regression 7;
+- release-tooling regression 6;
 - Chromium E2E 1.
 
-Task 9 documentation is a forward documentation-only successor to that runtime baseline.
+This walkthrough is a forward documentation-only successor to that runtime baseline.
 
 ## 3. Inspect typed and delegated authority
 

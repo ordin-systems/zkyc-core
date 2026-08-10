@@ -22,26 +22,27 @@
 
 | Reviewer-facing claim | Implementation artifact | Executable evidence |
 |---|---|---|
-| Strict Hono issuance/evaluation/delegation/consumption routes | `apps/core-api/src/app.ts` | 11 API/server tests |
+| Strict Hono issuance/evaluation/delegation/consumption routes | `apps/core-api/src/app.ts` | 13 API/server tests |
 | Receipts only from same-request `ALLOW`; step-up only from retained decision | `apps/core-api/src/app.ts` | API provenance and injection tests |
 | Retained current-state zkYA onboarding views | `apps/core-api/src/app.ts` | API onboarding lifecycle tests; SDK/UI/Chromium paths |
-| Strict runtime-validated browser SDK | `packages/sdk/src/index.ts`, `packages/sdk/src/validation.ts` | 8 SDK tests |
+| Strict runtime-validated, request-correlated browser SDK | `packages/sdk/src/index.ts`, `packages/sdk/src/validation.ts` | 10 SDK tests |
 | Versioned transcripts execute through API and SDK | `fixtures/full-stack-reference-cases.json` | API and SDK transcript runners |
 | Operator authority cockpit | `apps/operator-ui/src/App.tsx` | 3 operator UI tests and workspace build/typecheck checks |
 | Dedicated zkYA onboarding UI | `apps/zkya-onboarding/src/App.tsx` | 9 zkYA component tests and workspace build/typecheck checks |
 | Real local browser SDK/HTTP stack | `scripts/full-stack-smoke.mjs`, `e2e/zkya-onboarding.spec.ts`, `playwright.config.ts` | 1 Chromium E2E test |
-| Scanner regression | `scripts/security-check.mjs`, `scripts/security-check.test.mjs` | 1 scanner regression test |
+| Fail-closed publication/archive scanner | `scripts/security-check.mjs`, `scripts/archive-utils.mjs`, `scripts/security-check.test.mjs` | 7 scanner regression tests |
 | Loopback-only compiled listener | `apps/core-api/src/server-runtime.ts` | API/server socket test |
-| Package and dependency gates | `scripts/package-check.mjs`, `package-lock.json`, `package.json` | `npm run package:check`, `npm audit --audit-level=high` |
+| Source-derived package/archive and dependency gates | `scripts/package-check.mjs`, `scripts/package-utils.mjs`, `scripts/package-check.test.mjs`, `package-lock.json`, `package.json` | 6 release-tooling regression tests; `npm run package:check`; `npm audit --audit-level=high` |
 
 ## Exact behavioral inventory
 
 - core: 45 tests;
-- API/server: 11 tests;
-- SDK: 8 tests;
+- API/server: 13 tests;
+- SDK: 10 tests;
 - operator UI: 3 tests;
 - zkYA component: 9 tests;
-- scanner regression: 1 test;
+- scanner regression: 7 tests;
+- release-tooling regression: 6 tests;
 - Chromium E2E: 1 test.
 
 Format, security, typecheck, build, package, and dependency-audit results are separate checks. The checked-in CI workflow is inspectable configuration; this candidate documentation does not claim CI is green for the current head.

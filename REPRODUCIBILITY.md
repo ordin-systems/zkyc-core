@@ -8,7 +8,7 @@
 
 ## Exact candidate scope
 
-The v0.3 executable baseline is `1818222889f87bb7f5e331331d69a7be5fa24e2f`. Task 9 documentation is a forward documentation-only successor to that runtime. Neither identifier is a release tag.
+The v0.3 executable baseline is `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`. This documentation is a forward documentation-only successor to that runtime. Neither identifier is a release tag.
 
 ## Clean local verification
 
@@ -30,7 +30,7 @@ npm audit --audit-level=high
 `npm run verify` composes the same root gates. If Playwright Chromium is absent, install it separately after the lockfile install with:
 
 ```bash
-npx playwright install chromium
+npx --no-install playwright install chromium
 ```
 
 That download is an environment prerequisite. It is not a passing test or release receipt.
@@ -38,11 +38,12 @@ That download is an environment prerequisite. It is not a passing test or releas
 ## Behavioral test inventory
 
 - core: 45;
-- API/server: 11;
-- SDK: 8;
+- API/server: 13;
+- SDK: 10;
 - operator UI: 3;
 - zkYA component: 9;
-- scanner regression: 1;
+- scanner regression: 7;
+- release-tooling regression: 6;
 - Chromium E2E: 1.
 
 Formatting, security scanning, core/workspace typechecks, core/workspace builds, package proof, and dependency audit are distinct checks, not tests.

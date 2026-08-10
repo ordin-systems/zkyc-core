@@ -4,7 +4,7 @@
 
 **Prepared:** 2026-08-09
 
-**Candidate:** local `v0.3.0` implementation baseline `1818222889f87bb7f5e331331d69a7be5fa24e2f`
+**Candidate:** local `v0.3.0` implementation baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`
 
 This checked-in addendum reconciles dated evidence layers. It does not replace, edit, backdate, or reinterpret the frozen CV. Post-CV implementation does not retroactively alter deadline-time evidence.
 
@@ -45,7 +45,7 @@ The audit truthfully evaluated the frozen CV against historical evidence availab
 
 ## Layer 3 — post-CV v0.3 candidate implementation
 
-Executable baseline `1818222889f87bb7f5e331331d69a7be5fa24e2f` adds post-CV candidate evidence for:
+Executable baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd` adds post-CV candidate evidence for:
 
 - exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
 - credential v2 principal-type, affiliation, capability, action, resource, issuer, validity, and scope bindings;
@@ -55,11 +55,12 @@ Executable baseline `1818222889f87bb7f5e331331d69a7be5fa24e2f` adds post-CV cand
 - delegation/credential/policy expiry and revocation revalidation;
 - human-only exact-scope step-up request, resolution, authorization, and consumption;
 - authority-bound HMAC receipt v2 and one-time replay protection;
-- strict SDK runtime validation, executable versioned lifecycle transcripts, and retained onboarding views;
+- strict SDK runtime validation and request correlation, executable versioned lifecycle transcripts, and retained onboarding views;
 - both the operator cockpit and a dedicated zkYA onboarding UI;
-- one real local Chromium path through the built zkYA UI, SDK, and loopback API.
+- one real local Chromium path through the built zkYA UI, SDK, and loopback API;
+- fail-closed scanner/archive/package verification with blank-consumer package proof.
 
-Verified behavioral counts at that executable baseline are core 45, API/server 11, SDK 8, operator UI 3, zkYA component 9, scanner regression 1, and Chromium E2E 1. Typechecks, builds, format, security, package, and audit gates are separate checks.
+Verified behavioral counts at that executable baseline are core 45, API/server 13, SDK 10, operator UI 3, zkYA component 9, scanner regression 7, release-tooling regression 6, and Chromium E2E 1. Typechecks, builds, format, security, package, and audit gates are separate checks.
 
 This is integrated local candidate evidence only. It has not been pushed, merged, tagged, released, published, independently approved, or published to npm. It is not deadline-time evidence for the frozen CV.
 

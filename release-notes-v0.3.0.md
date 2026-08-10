@@ -2,7 +2,7 @@
 
 **Stage:** integrated local reference candidate; unreleased.
 
-**Executable baseline:** `1818222889f87bb7f5e331331d69a7be5fa24e2f`.
+**Executable baseline:** `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`.
 
 These notes describe candidate behavior. They are not evidence of a merge, tag, GitHub release, publication, immutable setting, CI result for this head, independent approval, archive digest, logged-out readback, or npm package.
 
@@ -17,20 +17,22 @@ These notes describe candidate behavior. They are not evidence of a merge, tag, 
 - policy ID/version pinning and expiry/revocation revalidation;
 - human-only step-up with exact approver capability, `step-up:resolve` action, and resource scope;
 - authority-bound step-up v2 and HMAC-SHA256 receipt v2 with one-time consumption;
-- strict SDK runtime validation of exact route schemas;
+- strict SDK runtime validation of exact route schemas and request/response authority correlation;
 - retained zkYA onboarding views showing current authority, eligibility, approval, and receipt state;
 - existing operator cockpit plus dedicated zkYA React/Vite onboarding UI;
 - executable versioned lifecycle transcripts through API and SDK;
-- real local Chromium E2E through the built zkYA UI, SDK, and loopback API.
+- real local Chromium E2E through the built zkYA UI, SDK, and loopback API;
+- fail-closed scanner/archive/package verification and blank-consumer package proof.
 
 ## Candidate test inventory
 
 - 45 core tests;
-- 11 API/server tests;
-- 8 SDK tests;
+- 13 API/server tests;
+- 10 SDK tests;
 - 3 operator UI tests;
 - 9 zkYA component tests;
-- 1 scanner regression test;
+- 7 scanner regression tests;
+- 6 release-tooling regression tests;
 - 1 Chromium E2E test.
 
 Typecheck, build, format, security, package, and dependency-audit gates are separate checks.

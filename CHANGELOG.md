@@ -18,16 +18,20 @@ All notable changes to the bounded reference implementation are recorded here. C
 - executable versioned full-stack lifecycle transcripts run through both API and SDK;
 - a dedicated zkYA onboarding reference UI and retained `/zkya/onboarding-views/:decisionLogId` projection;
 - v0.3 authority bindings in the existing operator UI;
-- a real local Chromium smoke test through the built zkYA UI, SDK, and loopback HTTP API.
+- a real local Chromium smoke test through the built zkYA UI, SDK, and loopback HTTP API;
+- current retained step-up eligibility derived from live subject, delegation, approver, expiry, revocation, and one-time-consumption state;
+- SDK request/response identity and requested-scope correlation;
+- clean-build, path-portable, fail-closed scanner/archive/package verification with blank-consumer imports and installed-API probing.
 
-### Verification inventory at executable baseline `1818222889f87bb7f5e331331d69a7be5fa24e2f`
+### Verification inventory at executable baseline `1a15de8117ea27672fbd7fffa1c63f633ca3b9bd`
 
 - core tests: 45;
-- API/server tests: 11;
-- SDK tests: 8;
+- API/server tests: 13;
+- SDK tests: 10;
 - operator UI tests: 3;
 - zkYA component tests: 9;
-- scanner regression tests: 1;
+- scanner regression tests: 7;
+- release-tooling regression tests: 6;
 - Chromium E2E tests: 1.
 
 Format, security, typecheck, build, package, and dependency-audit gates remain distinct checks and are not included as tests.
