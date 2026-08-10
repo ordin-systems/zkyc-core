@@ -610,15 +610,28 @@ function containsAllAffiliations(
   return required.every(({ organizationId, role }) => available.has(`${organizationId}\u0000${role}`));
 }
 
+function activeAt(
+  artifact: { readonly issuedAt: string; readonly expiresAt: string },
+  at: string,
+): boolean {
+  const issuedAt = Date.parse(artifact.issuedAt);
+  const expiresAt = Date.parse(artifact.expiresAt);
+  const evaluatedAt = Date.parse(at);
+  return Number.isFinite(issuedAt) && Number.isFinite(expiresAt) && Number.isFinite(evaluatedAt) &&
+    issuedAt <= evaluatedAt && evaluatedAt < expiresAt;
+}
+
 function suppliedAuthoritySatisfiesRule(
   input: EvaluateRequest,
   rule: PolicyRule,
+  decidedAt: string,
 ): boolean {
   if (input.authorityMode === "DIRECT") {
     const credential = input.credential;
     return credential !== null &&
       credential.principalId === input.principal.id &&
       credential.principalType === input.principal.type &&
+      activeAt(credential, decidedAt) &&
       credential.allowedActions.includes(input.action) &&
       credential.allowedResourceIds.includes(input.resourceId) &&
       containsAll(credential.capabilities, rule.requiredCapabilities) &&
@@ -626,8 +639,14 @@ function suppliedAuthoritySatisfiesRule(
   }
   return input.delegateIdentityCredential.principalId === input.principal.id &&
     input.delegateIdentityCredential.principalType === input.principal.type &&
+    input.delegateIdentityCredential.id !== input.grantorCredential.id &&
+    activeAt(input.delegateIdentityCredential, decidedAt) &&
+    activeAt(input.grantorCredential, decidedAt) &&
+    activeAt(input.delegation, decidedAt) &&
     input.delegation.delegateId === input.principal.id &&
     input.delegation.delegateType === input.principal.type &&
+    (input.delegation.delegateId !== input.delegation.grantorId ||
+      input.delegation.delegateType !== input.delegation.grantorType) &&
     input.delegation.grantorCredentialId === input.grantorCredential.id &&
     input.delegation.grantorId === input.grantorCredential.principalId &&
     input.delegation.grantorType === input.grantorCredential.principalType &&
@@ -650,13 +669,13 @@ function decisionMatchesRequestedPolicy(
   if (decision.outcome === "ALLOW") {
     return decision.reasonCode === "POLICY_ALLOW" &&
       rule?.effect === "ALLOW" &&
-      suppliedAuthoritySatisfiesRule(input, rule) &&
+      suppliedAuthoritySatisfiesRule(input, rule, decision.decidedAt) &&
       decision.requiredApproverCapability === undefined;
   }
   if (decision.outcome === "STEP_UP") {
     return decision.reasonCode === "HUMAN_APPROVAL_REQUIRED" &&
       rule?.effect === "STEP_UP" &&
-      suppliedAuthoritySatisfiesRule(input, rule) &&
+      suppliedAuthoritySatisfiesRule(input, rule, decision.decidedAt) &&
       decision.requiredApproverCapability === rule.approverCapability;
   }
   if (decision.reasonCode === "POLICY_DENY") return rule?.effect === "DENY";
@@ -829,7 +848,12 @@ export class ZkycReferenceClient {
         decision.policyId === input.policy.id &&
         decision.policyVersion === expectedPolicy.version &&
         decisionMatchesRequestedPolicy(decision, expectedPolicy, input) &&
-        (response.receipt !== undefined) === (input.issueReceipt && decision.outcome === "ALLOW"),
+        (response.receipt === undefined
+          ? !(input.issueReceipt && decision.outcome === "ALLOW")
+          : input.issueReceipt &&
+            decision.outcome === "ALLOW" &&
+            input.receiptExpiresAt !== undefined &&
+            Date.parse(response.receipt.payload.expiresAt) <= Date.parse(input.receiptExpiresAt)),
       );
       if (input.authorityMode === "DIRECT") {
         if (input.credential === null) {

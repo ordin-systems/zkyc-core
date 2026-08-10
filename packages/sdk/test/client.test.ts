@@ -648,6 +648,23 @@ test("SDK rejects valid responses bound to a different requested authority recor
     }));
   }
 
+  const expiredCredential: Credential = {
+    ...staticCredential,
+    issuedAt: "2026-05-31T23:00:00.000Z",
+    expiresAt: START,
+  };
+  const expiredCredentialClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      logId: "decision-log:forged-expired-authority",
+      decision: staticDecision,
+    })),
+  });
+  await expectInvalidResponse(() => expiredCredentialClient.evaluate({
+    ...evaluationInput,
+    credential: expiredCredential,
+  }));
+
   const missingRequestedReceiptClient = new ZkycReferenceClient({
     baseUrl: "https://invalid.reference",
     fetch: () => Promise.resolve(jsonResponse({
