@@ -287,6 +287,25 @@ test("SDK executes delegated issuance, evaluation, onboarding, receipt, and revo
     ["records:read"],
   );
   const delegatedPolicy = policy("ALLOW", "records:read");
+  await assert.rejects(
+    () => client.issueDelegation({
+      grantor: {
+        ...grantor,
+        affiliations: [{ organizationId: "organization:forged", role: "admin" }],
+      },
+      grantorCredential,
+      delegate,
+      policy: delegatedPolicy,
+      capabilities: ["records:read"],
+      allowedActions: ["records:read"],
+      allowedResourceIds: [RESOURCE],
+      expiresAt: ARTIFACT_EXPIRY,
+    }),
+    (error: unknown) =>
+      error instanceof ZkycApiError &&
+      error.status === 400 &&
+      error.code === "DELEGATION_GRANTOR_MISMATCH",
+  );
   const issued = await client.issueDelegation({
     grantor,
     grantorCredential,

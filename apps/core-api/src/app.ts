@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import {
   CredentialAuthority,
   DelegationAuthority,
+  DelegationValidationError,
   DomainValidationError,
   HumanStepUpService,
   InMemoryAtomicNonceStore,
@@ -494,6 +495,11 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
   app.onError((error, context) => {
     if (error instanceof ReferenceHttpError) {
       return context.json({ error: { code: error.code, message: error.message } }, error.status);
+    }
+    if (error instanceof DelegationValidationError) {
+      return context.json({
+        error: { code: error.code, message: "delegation request is invalid" },
+      }, 400);
     }
     if (error instanceof DomainValidationError || error instanceof SyntaxError) return invalidRequest(context);
     return context.json({ error: { code: "INTERNAL_ERROR", message: "reference adapter failed closed" } }, 500);

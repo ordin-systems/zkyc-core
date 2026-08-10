@@ -498,6 +498,12 @@ test("delegation issuance, delegated receipt consumption, and revocation stay au
     },
   });
   assert.equal(substitutedGrantor.response.status, 400);
+  assert.deepEqual(substitutedGrantor.body, {
+    error: {
+      code: "DELEGATION_GRANTOR_MISMATCH",
+      message: "delegation request is invalid",
+    },
+  });
 
   const evaluated = await evaluateDelegated(
     app,
