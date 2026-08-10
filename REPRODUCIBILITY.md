@@ -3,48 +3,70 @@
 ## Requirements
 
 - Node.js 20.19.x or Node.js 22.12.0 or newer;
-- npm with lockfile/workspace support.
+- npm with lockfile/workspace support;
+- Playwright Chromium for the browser gate.
 
-## Clean verification
+## Exact candidate scope
 
-From a fresh copy of the exact commit:
+The v0.3 executable baseline is `1818222889f87bb7f5e331331d69a7be5fa24e2f`. Task 9 documentation is a forward documentation-only successor to that runtime. Neither identifier is a release tag.
+
+## Clean local verification
+
+From a fresh copy of the exact candidate commit, start with:
 
 ```bash
 npm ci --ignore-scripts
-npm run verify
+npm run format:check
+npm run security:check
+npm run typecheck
+npm run typecheck:workspaces
+npm test
+npm run build:all
+npm run test:browser
+npm run package:check
+npm audit --audit-level=high
 ```
 
-The one-command verification performs:
+`npm run verify` composes the same root gates. If Playwright Chromium is absent, install it separately after the lockfile install with:
 
-1. repository format check;
-2. secret/private-path/excluded-surface security scan;
-3. strict core typecheck;
-4. core acceptance and regression tests;
-5. strict API, SDK and UI typechecks;
-6. API, SDK and React cockpit interaction tests;
-7. core, API, SDK and React/Vite production builds;
-8. package manifest/artifact verification plus an isolated core/API archive install and import;
-9. extensionless-file publication-scanner regression;
-10. dependency audit.
+```bash
+npx playwright install chromium
+```
 
-A passing build is not a deployment or production-readiness claim.
+That download is an environment prerequisite. It is not a passing test or release receipt.
 
-## Determinism
+## Behavioral test inventory
 
-Tests use fixed identifiers, timestamps, policies and non-production keys. No network service, database, external model or live secret is required. Time-sensitive behavior uses injected clocks.
+- core: 45;
+- API/server: 11;
+- SDK: 8;
+- operator UI: 3;
+- zkYA component: 9;
+- scanner regression: 1;
+- Chromium E2E: 1.
 
-The operator UI uses wall-clock future expirations only for interactive local demonstration. Its authority scenarios mirror checked-in deterministic fixtures, while executable fixture proof runs through API and SDK tests.
+Formatting, security scanning, core/workspace typechecks, core/workspace builds, package proof, and dependency audit are distinct checks, not tests.
 
-## Release verification receipt
+## What the gates exercise
 
-A release receipt records:
+- credential v2, typed principals, direct/delegated evaluation, one-hop attenuation, policy pinning, and reason-coded denial;
+- step-up v2 human/type/capability/action/resource binding and revalidation;
+- receipt v2 signature/binding validation, authority revalidation, and replay rejection;
+- strict API and SDK transport/schema behavior;
+- versioned lifecycle transcripts through both API and SDK runners;
+- both React UIs through component tests;
+- the built zkYA UI through a real local Chromium page, browser SDK, same-origin proxy, and loopback API.
 
-- exact Git commit and tree;
-- Node, npm, OS and architecture;
-- lockfile hash;
-- commands and exit status;
-- core/API/SDK test counts;
-- UI build output;
-- source archive and receipt hashes;
-- public CI, tag and release URLs;
-- explicit limitations.
+## Determinism and local runtime
+
+Core/API/SDK transcript tests use fixed identifiers, timestamps, policies, and non-production keys with injected clocks. The Chromium smoke starts a compiled API on IPv4 loopback using an ephemeral port and a built zkYA preview server. UI-only wall-clock values are for local demonstration and do not alter the deterministic fixture evidence.
+
+No database, external model, live credential service, production secret, or public network service is required.
+
+## Later release evidence
+
+`VERIFICATION_RECEIPT_TEMPLATE.md` is for a later exact tag. A completed receipt must be created after the exact tag exists and may record commit/tree, environment, lockfile, commands, test counts, and separately generated asset hashes. It must not claim publication or logged-out readback.
+
+After publication, a separate dated sidecar may record immutable-release API state, logged-out download, checksum, and extraction verification. That future audit cannot be prefilled inside the tag or made self-referential.
+
+A passing local build is not deployment, production readiness, release, publication, or external validation.

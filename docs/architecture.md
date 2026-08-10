@@ -1,58 +1,65 @@
 # Architecture
 
-## Decision boundary
+## Authority boundary
 
-zKYC Core is a deterministic authority-decision engine. It does not execute the requested action.
+zKYC Core is a deterministic authority-decision and one-time-consumption reference. It does not execute the requested action.
 
 ```text
-Principal + credential-bound affiliation/capabilities
+Typed principal + acting identity credential
         +
-Requested action + sensitivity + resource + context
+DIRECT credential
+   or
+DELEGATED grantor credential + one-hop delegation
         +
-Versioned policy
+Exact action/resource/context + versioned policy
         ↓
 Deterministic evaluator
         ↓
-ALLOW | DENY | STEP_UP + reason codes
+ALLOW | DENY | STEP_UP + reason + complete authority bindings
         │
-        ├─ ALLOW → trusted authority caller signs receipt
-        │          → consumer verifies complete expected bindings
-        │          → atomically consumes receipt nonce once
+        ├─ ALLOW → trusted adapter issues receipt v2
+        │          → consumer supplies complete expected binding
+        │          → current authority revalidated
+        │          → receipt nonce consumed once
         │
-        └─ STEP_UP → trusted authority caller creates review request
-                    → authorized approver resolves once
-                    → consumer verifies complete authorization bindings
-                    → atomically consumes authorization once
+        └─ STEP_UP → retained decision opens request v2
+                    → exact-scope HUMAN resolves
+                    → current authority revalidated
+                    → authorization v2 consumed once
 ```
 
 ## Components
 
-1. **Domain model** — validated principal, affiliation, capability, credential, action and policy records.
-2. **Credential registry** — issuance, status lookup and revocation.
-3. **Policy evaluator** — fail-closed deterministic rules; unsupported or contradictory input is denied.
-4. **Step-up registry** — time-bounded human review requiring an authorized approver and one final resolution.
-5. **Receipt service** — canonical payload serialization, HMAC-SHA256 signing and timing-safe verification.
-6. **Atomic nonce store** — one-time authorization consumption contract. The included in-memory adapter is a reference implementation, not a distributed durability claim.
-7. **Hono trusted adapter** — validates transport input, retains evaluator results and exposes bounded reference routes.
-8. **TypeScript SDK** — browser-compatible typed transport client with distinct API and network errors.
-9. **React/Vite cockpit** — reviewer interface for authority states, human resolution and one-time consumption.
+1. **Domain model** — exact `HUMAN`, `ORGANIZATION`, and `AGENT` principals plus validated identifiers, affiliations, sensitivity, and reason codes.
+2. **Credential authority** — registered credential v2 issuance, exact scope hashing, status lookup, expiry, and revocation.
+3. **Delegation authority** — registered policy-pinned one-hop grants with scope attenuation, binding hash, validity, and revocation.
+4. **Policy evaluator** — fail-closed direct/delegated evaluation against exact policy content.
+5. **Step-up service** — retained, time-bounded human-only resolution and one-time authorization v2.
+6. **Receipt service** — canonical authority-bound payload v2, HMAC-SHA256 signing, timing-safe verification, revalidation, and consumption.
+7. **Atomic nonce store** — domain-separated one-time consumption contract; the included adapter is in-memory.
+8. **Hono trusted adapter** — strict JSON routes, retained evaluator provenance, current onboarding views, and loopback runtime.
+9. **TypeScript SDK** — browser-compatible transport with exact runtime validation of successful/error responses.
+10. **React/Vite interfaces** — the operator authority cockpit and dedicated zkYA onboarding reference.
+11. **Evidence runners** — deterministic versioned transcripts plus real local Chromium smoke through the built stack.
 
-## Full-stack adapter boundary
+## Direct and delegated identity lanes
 
-The Hono adapter does not expose `signReceipt()` or `createRequest()` directly. An `ALLOW` receipt is constructed only inside the evaluation request that produced it. Step-up creation accepts a retained decision-log identifier rather than a caller-supplied decision. This turns the core's documented trusted-caller assumption into an inspectable transport invariant.
+Direct mode uses one active credential bound to the acting principal. Delegated mode uses the delegate's separate identity credential, the grantor's root credential, and a registered one-hop delegation. Capabilities/actions/resources attenuate from the grantor credential; grantor affiliations do not transfer. Delegated policy affiliation checks come only from the delegate identity credential.
 
-The API has no network authentication, tenancy, rate limiting or durable state. Its executable server binds only to IPv4 loopback. It is executable reference evidence and must not be deployed as-is. The SDK and UI do not expand authority: they can only invoke the adapter's validated routes.
+## Trusted-adapter boundary
 
-## Trusted-authority boundary
+There is no generic receipt-signing endpoint. The API issues a receipt only from the `ALLOW` generated in the current evaluation request. Step-up creation accepts a retained decision-log ID instead of a caller-supplied decision object.
 
-`signReceipt()` and `HumanStepUpService.createRequest()` are issuer-side primitives. Their callers are trusted authority adapters and must supply the corresponding output from `evaluateAccess()`. A structurally valid plain object does not independently prove policy-decision provenance.
+These invariants strengthen issuer-side provenance but do not make the unauthenticated adapter production-safe. Core issuer primitives still assume trusted callers when used outside the adapter.
 
-The consumer boundary is stricter: `verifyAndConsumeReceipt()` requires a complete expected binding object, rechecks current credential status and consumes a derived nonce key atomically. Human step-up authorizations use the separate `consumeAuthorization()` path and are not converted into receipts in this release.
+## Retained state and onboarding
 
-## Authority hierarchy
+Credentials, delegations, revocations, decisions, step-up state, onboarding projections, receipt status, and nonces are retained in memory. `GET /zkya/onboarding-views/:decisionLogId` recomputes current authority/approval/receipt state from those retained artifacts. Restarting the API clears all state.
 
-Deterministic policy is authoritative. Contextual metadata—including external proof identifiers—may be recorded but cannot independently grant authority. External AI classification, if added by a future adapter, must remain advisory and cannot override the deterministic evaluator.
+## Interfaces and browser evidence
 
-## Execution boundary
+Both UIs invoke the same strict SDK/API authority path. `npm run test:browser` starts the compiled loopback API and built zkYA app and drives one Chromium E2E test over real local HTTP. This is local execution evidence, not deployment or public availability.
 
-A valid, consumed `ALLOW` receipt or approved step-up authorization can be used by a separate adapter to permit a downstream action. This repository does not include that adapter or claim that already-running external actions can be interrupted.
+## Maturity boundary
+
+The candidate is not production identity/KYC/AML, ZK verification, authentication, deployment, durability, protected execution, adoption, or external validation. The SDK and UIs cannot widen authority and do not execute downstream actions.

@@ -2,97 +2,99 @@
 
 **Deterministic Agent Identity and Action-Authority Reference Stack**
 
-> **Status:** immutable full-stack reference released as [`v0.2.1-full-stack-reference`](https://github.com/ordin-systems/zkyc-core/releases/tag/v0.2.1-full-stack-reference). This patch preserves the v0.2 runtime and evidence boundaries while adding the canonical joint author/co-architect credit.
+> **Status:** integrated local `v0.3.0` reference candidate. The executable baseline is commit `1818222889f87bb7f5e331331d69a7be5fa24e2f`; subsequent Task 9 documentation does not change its runtime. This candidate has not been pushed, merged, tagged, released, published, or independently approved.
 
-zKYC Core evaluates a principal, credential and requested action against versioned policy; returns a reason-coded `ALLOW`, `DENY` or `STEP_UP`; and supports bound, one-time authority consumption.
+zKYC Core evaluates typed principals and direct or delegated authority against exact credential, action, resource, and versioned-policy scope. It returns reason-coded `ALLOW`, `DENY`, or `STEP_UP` decisions and supports one-time, authority-bound consumption.
 
-The v0.2 full-stack reference adds a sanitized demonstration around the audited core:
+The candidate includes:
 
-- Hono reference API;
-- browser-compatible TypeScript SDK;
-- React/Vite operator cockpit;
-- reason-coded in-memory decision/receipt history;
-- deterministic full-stack fixtures;
-- API/SDK contract tests and automated UI interaction coverage;
-- CI-backed core, API, SDK and UI builds.
+- `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
+- scoped credential v2 records and one-hop attenuated delegation grants;
+- separate acting-subject and grantor credentials in delegated mode, with no grantor-affiliation transfer;
+- policy-pinned delegation, expiry/revocation revalidation, and human-only exact-scope step-up;
+- authority-bound HMAC-SHA256 receipt v2 verification and replay rejection;
+- Hono API, strictly runtime-validated TypeScript SDK, operator cockpit, and zkYA onboarding reference;
+- executable versioned lifecycle transcripts and one real local Chromium end-to-end test.
 
-The immutable [`v0.1.0-reference`](https://github.com/ordin-systems/zkyc-core/releases/tag/v0.1.0-reference) release remains unchanged.
+Historical immutable release [`v0.2.1-full-stack-reference`](https://github.com/ordin-systems/zkyc-core/releases/tag/v0.2.1-full-stack-reference) remains unchanged. The candidate does not rewrite its evidence or make `v0.3.0` a release.
 
 ## Workspace map
 
 - `src/` — deterministic authority core;
-- `apps/core-api/` — trusted Hono transport adapter;
-- `packages/sdk/` — typed browser-compatible client;
-- `apps/operator-ui/` — React/Vite reviewer cockpit;
-- `fixtures/` — deterministic core and full-stack cases;
-- `test/`, `apps/core-api/test/`, `packages/sdk/test/` — executable evidence.
+- `apps/core-api/` — trusted Hono transport adapter and retained onboarding views;
+- `packages/sdk/` — browser-compatible client with exact runtime response validation;
+- `apps/operator-ui/` — authority lifecycle reviewer cockpit;
+- `apps/zkya-onboarding/` — zkYA / Know-Your-Agent onboarding reference UI;
+- `fixtures/` — deterministic core and versioned full-stack transcripts;
+- `e2e/` and `scripts/full-stack-smoke.mjs` — real local SDK/HTTP/Chromium smoke path;
+- `test/` and workspace test directories — executable behavioral evidence.
 
-## What v0.2 proves
+## Review the candidate
 
-- configurable action sensitivity tiers and content-versioned policy;
-- credential issuance, expiry and revocation checks;
-- reason-coded `ALLOW`, `DENY` and `STEP_UP` decisions;
-- bound human approval and rejection workflows;
-- HMAC-SHA256 receipts issued only from same-transaction `ALLOW` decisions;
-- complete receipt binding, credential recheck and one-time replay consumption;
-- step-up creation only from retained evaluator output;
-- typed API/SDK contracts and clean React/Vite production build;
-- deterministic fixtures plus negative-path, tamper, redirect, provenance, UI-state and concurrency tests.
-
-## One-command verification
+From the exact candidate checkout, begin with the lockfile-only install and run the root gates explicitly:
 
 ```bash
 npm ci --ignore-scripts
-npm run verify
+npm run format:check
+npm run security:check
+npm run typecheck
+npm run typecheck:workspaces
+npm test
+npm run build:all
+npm run test:browser
+npm run package:check
+npm audit --audit-level=high
 ```
 
-`verify` runs repository formatting and publication-safety scans, strict core/workspace typechecks, core/API/SDK/UI and scanner regression tests, every workspace build, archive membership plus isolated-import checks, and `npm audit`.
+`npm run verify` composes those gates. Typecheck, build, format, security, package, and dependency-audit gates are checks, not tests.
 
-## Local reviewer cockpit
+The browser test requires Playwright Chromium. If it is not already present, run `npx playwright install chromium` after `npm ci --ignore-scripts` and before `npm run test:browser`. Browser installation is an environment prerequisite, not evidence that the test passed.
 
-Build the stack:
+Current executable test inventory for the baseline is: core 45, API/server 11, SDK 8, operator UI 3, zkYA component 9, scanner regression 1, and Chromium E2E 1.
+
+## Run the local interfaces
+
+Build the workspaces:
 
 ```bash
-npm ci --ignore-scripts
 npm run build:all
 ```
 
-Start the reference API with a generated local-only HMAC key:
+Start the loopback API with a generated local-only HMAC key:
 
 ```bash
 export ZKYC_RECEIPT_HMAC_KEY="$(openssl rand -hex 32)"
 npm run start -w @ordin/zkyc-core-api-reference
 ```
 
-In another terminal:
+In another terminal, run either reviewer UI:
 
 ```bash
 npm run dev -w @ordin/zkyc-operator-ui-reference
+# or
+npm run dev -w @ordin/zkya-onboarding-reference
 ```
 
-The UI proxies `/api` to the local Hono adapter. It does not expose signing keys or execute protected actions.
+Both UIs call the local SDK/API stack. They display authority state and one-time consumption; they do not verify identity or execute protected actions.
 
 ## Evidence chain
 
-`operator/SDK → Hono trusted adapter → deterministic evaluator → reason-coded decision → receipt or bound step-up → complete verification → one-time consumption`
+`UI/SDK → Hono trusted adapter → deterministic evaluator → reason-coded decision → receipt or bound step-up → current-authority revalidation → one-time consumption`
 
-See:
+Start with:
 
+- `docs/principal-and-delegation-model.md`
+- `docs/zkya-onboarding-reference.md`
 - `docs/full-stack-reference.md`
 - `docs/api-contract.md`
-- `docs/architecture.md`
-- `docs/threat-model.md`
+- `docs/reviewer-walkthrough.md`
 - `docs/evidence-map.md`
-- `REPRODUCIBILITY.md`
 - `CLAIMS_AND_LIMITATIONS.md`
+- `REPRODUCIBILITY.md`
 - `PROVENANCE.md`
 
 ## Critical boundaries
 
-This is a **reference implementation**, not production infrastructure. The Hono API intentionally omits authentication, tenancy, rate limiting, durable storage and distributed coordination. Do not deploy it as-is.
+This is an integrated local reference candidate, not production identity, KYC/AML, zero-knowledge verification, authentication, deployment, durable/distributed state, protected execution, adoption, or external validation. The API is unauthenticated and in-memory and must not be deployed as-is. `zkPassProofId` and related values remain non-authoritative metadata.
 
-Decision logs, credentials, step-up state and nonces use in-memory reference adapters. HMAC receipts assume a shared-secret trust domain. The UI demonstrates authority state only; it never executes a requested action.
-
-`zkPassProofId` and similar identifiers are non-authoritative contextual metadata. This repository does not verify zero-knowledge proofs or perform real-world KYC/AML.
-
-No license is granted unless and until ORDIN publishes an explicit license file.
+No npm registry publication is authorized. No license is granted unless and until ORDIN publishes an explicit license file.
