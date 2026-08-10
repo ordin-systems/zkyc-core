@@ -7,7 +7,7 @@
 | Exact `HUMAN` / `ORGANIZATION` / `AGENT` principals | `src/domain.ts`, `src/credentials.ts` | Core principal/credential v2 tests; API/SDK strict-schema tests |
 | Credential v2 exact capabilities/actions/resources and scope hash | `src/credentials.ts` | Core scope, redirect, tamper, and revocation tests |
 | Explicit direct/delegated modes with no mixed fields | `src/evaluation.ts` | Core and API fail-closed mode tests |
-| Separate delegate identity and grantor credentials | `src/evaluation.ts`, `src/delegations.ts` | Core self-delegation and same-credential rejection; substitution/inactivity tests; delegated API/SDK lifecycle tests |
+| Exact credential-bound grantor affiliations plus separate delegate/grantor credentials | `src/evaluation.ts`, `src/delegations.ts` | Core affiliation/self-delegation/same-credential rejection; substitution/inactivity tests; delegated API/SDK lifecycle tests |
 | One-hop attenuation and no delegated redelegation | `src/delegations.ts` | Core delegation issuance/scope-escalation tests |
 | No grantor-affiliation transfer | `src/evaluation.ts` | Core delegated-affiliation test; operator/zkYA UI tests |
 | Immutable trusted-policy registry, policy-pinned delegation, and binding hash | `src/policy.ts`, `src/credentials.ts`, `src/evaluation.ts`, `src/delegations.ts` | Core registry replacement, untrusted-policy, exact-version, and binding-tamper tests |

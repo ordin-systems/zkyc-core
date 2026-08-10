@@ -2,12 +2,12 @@
 
 ## Supported v0.3 candidate claims
 
-At executable baseline `5cb455fa6f176ad76d069a9e51d00e3b957091df`, the integrated local reference candidate supports these bounded claims:
+At executable baseline `780fe8704f591f6064940d601b095aa13371d96a`, the integrated local reference candidate supports these bounded claims:
 
 - exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
 - credential v2 binding of principal ID/type, credential-bound affiliations, capabilities, exact actions, exact resources, issuer, validity, and scope hash;
 - explicit `DIRECT` and `DELEGATED` authority modes;
-- registered one-hop delegations that bind distinct grantor and delegate identities, the grantor credential, exact policy ID/version, time bounds, and attenuated capability/action/resource scope;
+- registered one-hop delegations that bind exact credential-bound grantor identity/affiliations, a distinct delegate identity, the grantor credential, exact policy ID/version, time bounds, and attenuated capability/action/resource scope;
 - separate, non-reusable delegate identity and grantor credentials, without transfer of grantor affiliations or delegated `delegation:issue` authority;
 - immutable startup policy registries with exact `(id, version)` resolution and live policy outcome re-evaluation at authorizing transitions;
 - deterministic, reason-coded `ALLOW`, `DENY`, and `STEP_UP` decisions;

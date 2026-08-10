@@ -4,7 +4,7 @@
 
 **Prepared:** 2026-08-09
 
-**Candidate:** local `v0.3.0` implementation baseline `5cb455fa6f176ad76d069a9e51d00e3b957091df`
+**Candidate:** local `v0.3.0` implementation baseline `780fe8704f591f6064940d601b095aa13371d96a`
 
 This checked-in addendum reconciles dated evidence layers. It does not replace, edit, backdate, or reinterpret the frozen CV. Post-CV implementation does not retroactively alter deadline-time evidence.
 
@@ -45,7 +45,7 @@ The audit truthfully evaluated the frozen CV against historical evidence availab
 
 ## Layer 3 — post-CV v0.3 candidate implementation
 
-Executable baseline `5cb455fa6f176ad76d069a9e51d00e3b957091df` adds post-CV candidate evidence for:
+Executable baseline `780fe8704f591f6064940d601b095aa13371d96a` adds post-CV candidate evidence for:
 
 - exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
 - credential v2 principal-type, affiliation, capability, action, resource, issuer, validity, and scope bindings;

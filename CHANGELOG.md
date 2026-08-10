@@ -30,12 +30,13 @@ All notable changes to the bounded reference implementation are recorded here. C
 
 - the defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES` for step-up creation semantics and receipt-template counts;
 - the parallel specification review timed out without a verdict after independently reproducing forged SDK scope, policy-version, and policy-outcome acceptance;
-- executable baseline `5cb455fa6f176ad76d069a9e51d00e3b957091df` remediates all reproduced findings and passes the local integrated verifier;
+- executable baseline `780fe8704f591f6064940d601b095aa13371d96a` remediates all reproduced findings and passes the local integrated verifier;
 - at superseded candidate `5749f77495bb075871fed0e80eff3ca89e2f9d9f`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` after proving an unsatisfied-capability forged `ALLOW`; this baseline closes that finding and adjacent affiliation/scope/decision-time/receipt/resolution correlations;
 - at superseded candidate `db759f18ff727e59e70f472b193d88cd404e61fe`, both reviewers returned `REQUEST_CHANGES` after independently proving grantor-scope escalation, and the specification reviewer additionally proved direct principal/credential affiliation substitution; this baseline mirrors core exact-subject and delegation-attenuation invariants in SDK issuance and evaluation correlation;
+- at superseded candidate `ab67604a67263af316a5dd78643435e3045809fb`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` after proving that core delegation issuance accepted caller-substituted grantor affiliations; this baseline requires exact credential-bound grantor affiliations in core and API issuance as well as SDK correlation;
 - no independent `PASS` is claimed for this successor until new exact-head reviews complete.
 
-### Verification inventory at executable baseline `5cb455fa6f176ad76d069a9e51d00e3b957091df`
+### Verification inventory at executable baseline `780fe8704f591f6064940d601b095aa13371d96a`
 
 - core tests: 46;
 - API/server tests: 13;

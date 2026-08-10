@@ -8,7 +8,7 @@
 
 ## Exact candidate scope
 
-The v0.3 executable baseline is `5cb455fa6f176ad76d069a9e51d00e3b957091df`. This documentation is a forward documentation-only successor to that runtime. Neither identifier is a release tag.
+The v0.3 executable baseline is `780fe8704f591f6064940d601b095aa13371d96a`. This documentation is a forward documentation-only successor to that runtime. Neither identifier is a release tag.
 
 ## Clean local verification
 
