@@ -20,13 +20,20 @@ All notable changes to the bounded reference implementation are recorded here. C
 - v0.3 authority bindings in the existing operator UI;
 - a real local Chromium smoke test through the built zkYA UI, SDK, and loopback HTTP API;
 - current retained step-up eligibility derived from live subject, delegation, approver, expiry, revocation, and one-time-consumption state;
-- SDK request/response identity and requested-scope correlation;
+- SDK request/response identity, canonical scope-hash, context-hash, exact-policy-version, policy-outcome, delegation-binding, and requested-expiry correlation;
 - immutable startup policy registries and exact live-policy re-evaluation for evaluation, step-up, and receipt transitions;
 - fail-closed rejection of self-delegation and any reuse of the acting credential in the grantor lane;
 - strict SDK handling for legitimate unbound credential-missing denials and decision-log-correlated step-up creation;
 - clean-build, path-portable, fail-closed scanner/archive/package verification with blank-consumer imports and installed-API probing.
 
-### Verification inventory at executable baseline `55d15981cf7f45e441205eb96f5aae79e58d00ae`
+### Independent-review remediation state
+
+- the defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES` for step-up creation semantics and receipt-template counts;
+- the parallel specification review timed out without a verdict after independently reproducing forged SDK scope, policy-version, and policy-outcome acceptance;
+- executable baseline `a37b422010d36ea76284c17aaa0869cda6237461` remediates all reproduced findings and passes the local integrated verifier;
+- no independent `PASS` is claimed for this successor until new exact-head reviews complete.
+
+### Verification inventory at executable baseline `a37b422010d36ea76284c17aaa0869cda6237461`
 
 - core tests: 46;
 - API/server tests: 13;

@@ -25,7 +25,7 @@
 | Strict Hono issuance/evaluation/delegation/consumption routes | `apps/core-api/src/app.ts` | 13 API/server tests |
 | Receipts only from same-request `ALLOW`; step-up only from retained decision | `apps/core-api/src/app.ts` | API provenance and injection tests |
 | Retained current-state zkYA onboarding views | `apps/core-api/src/app.ts` | API onboarding lifecycle tests; SDK/UI/Chromium paths |
-| Strict runtime-validated, request-correlated browser SDK | `packages/sdk/src/index.ts`, `packages/sdk/src/validation.ts` | 12 SDK tests, including credentialless-denial and step-up decision-log correlation |
+| Strict runtime-validated, request-correlated browser SDK | `packages/sdk/src/index.ts`, `packages/sdk/src/validation.ts`, `packages/sdk/src/integrity.ts` | 12 SDK tests, including credentialless denial and forged scope/context/policy/outcome/delegation/step-up response rejection |
 | Versioned transcripts execute through API and SDK | `fixtures/full-stack-reference-cases.json` | API and SDK transcript runners |
 | Operator authority cockpit | `apps/operator-ui/src/App.tsx` | 3 operator UI tests and workspace build/typecheck checks |
 | Dedicated zkYA onboarding UI | `apps/zkya-onboarding/src/App.tsx` | 9 zkYA component tests and workspace build/typecheck checks |

@@ -2,7 +2,7 @@
 
 **Deterministic Agent Identity and Action-Authority Reference Stack**
 
-> **Status:** integrated local `v0.3.0` reference candidate. The executable baseline is commit `55d15981cf7f45e441205eb96f5aae79e58d00ae`; this documentation-only successor does not change its runtime. This candidate has not been pushed, merged, tagged, released, published, or independently approved.
+> **Status:** integrated local `v0.3.0` reference candidate. The executable baseline is commit `a37b422010d36ea76284c17aaa0869cda6237461`; this documentation-only successor does not change its runtime. This candidate has not been pushed, merged, tagged, released, published, or independently approved.
 
 zKYC Core evaluates typed principals and direct or delegated authority against exact credential, action, resource, and versioned-policy scope. It returns reason-coded `ALLOW`, `DENY`, or `STEP_UP` decisions and supports one-time, authority-bound consumption.
 
@@ -13,7 +13,7 @@ The candidate includes:
 - separate acting-subject and grantor credentials in delegated mode, with no grantor-affiliation transfer;
 - policy-pinned delegation, expiry/revocation revalidation, and human-only exact-scope step-up;
 - authority-bound HMAC-SHA256 receipt v2 verification and replay rejection;
-- Hono API, strictly runtime-validated and request-correlated TypeScript SDK, operator cockpit, and zkYA onboarding reference;
+- Hono API, strictly runtime-validated TypeScript SDK with recomputed derived-authority correlation, operator cockpit, and zkYA onboarding reference;
 - executable versioned lifecycle transcripts and one real local Chromium end-to-end test;
 - clean-build, fail-closed archive/scanner/package checks with blank-consumer package proof.
 

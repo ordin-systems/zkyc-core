@@ -2,7 +2,7 @@
 
 ## Supported v0.3 candidate claims
 
-At executable baseline `55d15981cf7f45e441205eb96f5aae79e58d00ae`, the integrated local reference candidate supports these bounded claims:
+At executable baseline `a37b422010d36ea76284c17aaa0869cda6237461`, the integrated local reference candidate supports these bounded claims:
 
 - exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
 - credential v2 binding of principal ID/type, credential-bound affiliations, capabilities, exact actions, exact resources, issuer, validity, and scope hash;
@@ -17,7 +17,7 @@ At executable baseline `55d15981cf7f45e441205eb96f5aae79e58d00ae`, the integrate
 - HMAC-SHA256 receipt v2 bound to mode, typed subject, acting credential, effective scope, action/resource/context, policy, outcome/reason, and delegated grant fields when applicable;
 - timing-safe verification and atomic one-time receipt/authorization consumption;
 - Hono reference API with retained evaluator provenance and current-state onboarding projections;
-- browser-compatible TypeScript SDK with strict exact-schema runtime validation and request/response authority correlation;
+- browser-compatible TypeScript SDK with strict exact-schema runtime validation and recomputed scope, context, policy, outcome, delegation-binding, and step-up request/response correlation;
 - operator and zkYA React/Vite reference UIs;
 - deterministic core fixtures plus versioned full-stack transcripts executed by API and SDK tests;
 - a real local Chromium test through the built zkYA UI, SDK, and loopback API;

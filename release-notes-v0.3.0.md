@@ -2,7 +2,7 @@
 
 **Stage:** integrated local reference candidate; unreleased.
 
-**Executable baseline:** `55d15981cf7f45e441205eb96f5aae79e58d00ae`.
+**Executable baseline:** `a37b422010d36ea76284c17aaa0869cda6237461`.
 
 These notes describe candidate behavior. They are not evidence of a merge, tag, GitHub release, publication, immutable setting, CI result for this head, independent approval, archive digest, logged-out readback, or npm package.
 
@@ -18,7 +18,7 @@ These notes describe candidate behavior. They are not evidence of a merge, tag, 
 - immutable startup policy allowlists with exact live-policy re-evaluation at every authorizing transition;
 - human-only step-up with exact approver capability, `step-up:resolve` action, and resource scope;
 - authority-bound step-up v2 and HMAC-SHA256 receipt v2 with one-time consumption;
-- strict SDK runtime validation of exact route schemas and request/response authority correlation;
+- strict SDK runtime validation of exact route schemas and recomputed request/response scope, context, policy, outcome, delegation-binding, decision-log, expiry, and initial-status correlation;
 - retained zkYA onboarding views showing current authority, eligibility, approval, and receipt state;
 - existing operator cockpit plus dedicated zkYA React/Vite onboarding UI;
 - executable versioned lifecycle transcripts through API and SDK;
@@ -37,6 +37,10 @@ These notes describe candidate behavior. They are not evidence of a merge, tag, 
 - 1 Chromium E2E test.
 
 Typecheck, build, format, security, package, and dependency-audit gates are separate checks.
+
+## Independent review state
+
+The defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES`. Its two findings were remediated in the executable baseline above. The parallel specification review timed out without a verdict after reproducing additional forged SDK derived-hash and policy-semantic acceptance; those reproduced paths were also remediated and regression-tested. This successor has not yet received new exact-head independent `PASS` verdicts.
 
 ## Compatibility and state
 
