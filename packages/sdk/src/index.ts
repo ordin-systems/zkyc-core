@@ -631,6 +631,7 @@ function suppliedAuthoritySatisfiesRule(
     return credential !== null &&
       credential.principalId === input.principal.id &&
       credential.principalType === input.principal.type &&
+      sameCanonicalAffiliations(credential.affiliations, input.principal.affiliations) &&
       activeAt(credential, decidedAt) &&
       credential.allowedActions.includes(input.action) &&
       credential.allowedResourceIds.includes(input.resourceId) &&
@@ -639,6 +640,10 @@ function suppliedAuthoritySatisfiesRule(
   }
   return input.delegateIdentityCredential.principalId === input.principal.id &&
     input.delegateIdentityCredential.principalType === input.principal.type &&
+    sameCanonicalAffiliations(
+      input.delegateIdentityCredential.affiliations,
+      input.principal.affiliations,
+    ) &&
     input.delegateIdentityCredential.id !== input.grantorCredential.id &&
     activeAt(input.delegateIdentityCredential, decidedAt) &&
     activeAt(input.grantorCredential, decidedAt) &&
@@ -650,6 +655,12 @@ function suppliedAuthoritySatisfiesRule(
     input.delegation.grantorCredentialId === input.grantorCredential.id &&
     input.delegation.grantorId === input.grantorCredential.principalId &&
     input.delegation.grantorType === input.grantorCredential.principalType &&
+    activeAt(input.grantorCredential, input.delegation.issuedAt) &&
+    Date.parse(input.delegation.expiresAt) <= Date.parse(input.grantorCredential.expiresAt) &&
+    !input.delegation.capabilities.includes("delegation:issue") &&
+    containsAll(input.grantorCredential.capabilities, input.delegation.capabilities) &&
+    containsAll(input.grantorCredential.allowedActions, input.delegation.allowedActions) &&
+    containsAll(input.grantorCredential.allowedResourceIds, input.delegation.allowedResourceIds) &&
     input.delegation.allowedActions.includes(input.action) &&
     input.delegation.allowedResourceIds.includes(input.resourceId) &&
     containsAll(input.delegation.capabilities, rule.requiredCapabilities) &&
@@ -808,6 +819,8 @@ export class ZkycReferenceClient {
         delegation.issuerId === input.grantorCredential.issuerId &&
         delegation.grantorId === input.grantor.id &&
         delegation.grantorType === input.grantor.type &&
+        sameCanonicalAffiliations(input.grantorCredential.affiliations, input.grantor.affiliations) &&
+        (input.grantor.id !== input.delegate.id || input.grantor.type !== input.delegate.type) &&
         delegation.delegateId === input.delegate.id &&
         delegation.delegateType === input.delegate.type &&
         delegation.policyId === input.policy.id &&
@@ -817,6 +830,12 @@ export class ZkycReferenceClient {
         sameCanonicalStrings(delegation.allowedResourceIds, input.allowedResourceIds) &&
         delegation.scopeHash === expectedScopeHash &&
         delegation.delegationBindingHash === expectedBindingHash &&
+        activeAt(input.grantorCredential, delegation.issuedAt) &&
+        Date.parse(delegation.expiresAt) <= Date.parse(input.grantorCredential.expiresAt) &&
+        !delegation.capabilities.includes("delegation:issue") &&
+        containsAll(input.grantorCredential.capabilities, delegation.capabilities) &&
+        containsAll(input.grantorCredential.allowedActions, delegation.allowedActions) &&
+        containsAll(input.grantorCredential.allowedResourceIds, delegation.allowedResourceIds) &&
         delegation.expiresAt === input.expiresAt,
       );
       return response;

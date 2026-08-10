@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createReferenceApp } from "@ordin/zkyc-core-api-reference";
 import {
+  computeDelegationBindingHash,
   computeScopeHash,
   createPolicy,
   sha256Version,
@@ -648,6 +649,22 @@ test("SDK rejects valid responses bound to a different requested authority recor
     }));
   }
 
+  const mismatchedAffiliationPrincipal: Principal = {
+    ...human,
+    affiliations: [{ organizationId: "organization:caller", role: "member" }],
+  };
+  const mismatchedPrincipalClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      logId: "decision-log:forged-principal-affiliation",
+      decision: staticDecision,
+    })),
+  });
+  await expectInvalidResponse(() => mismatchedPrincipalClient.evaluate({
+    ...evaluationInput,
+    principal: mismatchedAffiliationPrincipal,
+  }));
+
   const expiredCredential: Credential = {
     ...staticCredential,
     issuedAt: "2026-05-31T23:00:00.000Z",
@@ -676,6 +693,120 @@ test("SDK rejects valid responses bound to a different requested authority recor
     ...evaluationInput,
     issueReceipt: true,
     receiptExpiresAt: ARTIFACT_EXPIRY,
+  }));
+
+  const escalationDelegate: Principal = {
+    id: "agent:escalation-probe",
+    type: "AGENT",
+    affiliations: [],
+  };
+  const delegateIdentityScope = {
+    capabilities: [] as readonly string[],
+    allowedActions: [] as readonly string[],
+    allowedResourceIds: [] as readonly string[],
+  };
+  const escalationDelegateCredential: Credential = {
+    version: 2,
+    id: "credential:escalation-delegate",
+    issuerId: staticCredential.issuerId,
+    principalId: escalationDelegate.id,
+    principalType: escalationDelegate.type,
+    affiliations: [],
+    ...delegateIdentityScope,
+    issuedAt: START,
+    expiresAt: EXPIRY,
+    scopeHash: computeScopeHash(delegateIdentityScope),
+  };
+  const escalationPolicyInput: PolicyInput = {
+    id: "policy:delegation-escalation-probe",
+    rules: [{
+      action: "records:read",
+      actionSensitivity: "ROUTINE",
+      requiredCapabilities: ["admin"],
+      requiredAffiliations: [],
+      effect: "ALLOW",
+    }],
+  };
+  const escalationPolicy = createPolicy(escalationPolicyInput);
+  const escalationScope = {
+    capabilities: ["admin"],
+    allowedActions: ["records:read"],
+    allowedResourceIds: [RESOURCE],
+  } as const;
+  const escalationDelegationSeed: CapabilityDelegation = {
+    version: 1,
+    id: "delegation:escalation-probe",
+    issuerId: staticCredential.issuerId,
+    grantorCredentialId: staticCredential.id,
+    grantorId: human.id,
+    grantorType: human.type,
+    delegateId: escalationDelegate.id,
+    delegateType: escalationDelegate.type,
+    policyId: escalationPolicy.id,
+    policyVersion: escalationPolicy.version,
+    ...escalationScope,
+    issuedAt: START,
+    expiresAt: EXPIRY,
+    scopeHash: computeScopeHash(escalationScope),
+    delegationBindingHash: HASH_0,
+  };
+  const escalationDelegation: CapabilityDelegation = {
+    ...escalationDelegationSeed,
+    delegationBindingHash: computeDelegationBindingHash(escalationDelegationSeed as never),
+  };
+  const escalationIssueClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({ delegation: escalationDelegation }, 201)),
+  });
+  await expectInvalidResponse(() => escalationIssueClient.issueDelegation({
+    grantor: human,
+    grantorCredential: staticCredential,
+    delegate: escalationDelegate,
+    policy: escalationPolicyInput,
+    ...escalationScope,
+    expiresAt: EXPIRY,
+  }));
+
+  const forgedDelegatedDecision: AccessDecision = {
+    version: 2,
+    outcome: "ALLOW",
+    reasonCode: "POLICY_ALLOW",
+    authorityMode: "DELEGATED",
+    subjectId: escalationDelegate.id,
+    subjectType: escalationDelegate.type,
+    actingCredentialId: escalationDelegateCredential.id,
+    effectiveScopeHash: escalationDelegation.scopeHash,
+    action: "records:read",
+    actionSensitivity: "ROUTINE",
+    resourceId: RESOURCE,
+    contextHash: emptyContextHash,
+    policyId: escalationPolicy.id,
+    policyVersion: escalationPolicy.version,
+    decidedAt: START,
+    grantorId: human.id,
+    grantorType: human.type,
+    grantorCredentialId: staticCredential.id,
+    delegationId: escalationDelegation.id,
+    delegationBindingHash: escalationDelegation.delegationBindingHash,
+  };
+  const escalationEvaluationClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      logId: "decision-log:delegation-escalation-probe",
+      decision: forgedDelegatedDecision,
+    })),
+  });
+  await expectInvalidResponse(() => escalationEvaluationClient.evaluate({
+    authorityMode: "DELEGATED",
+    principal: escalationDelegate,
+    delegateIdentityCredential: escalationDelegateCredential,
+    grantorCredential: staticCredential,
+    delegation: escalationDelegation,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: {},
+    policy: escalationPolicyInput,
+    issueReceipt: false,
   }));
 
   const delegate: Principal = { id: staticDelegation.delegateId, type: "AGENT", affiliations: [] };
