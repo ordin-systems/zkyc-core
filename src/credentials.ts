@@ -1,29 +1,41 @@
-import { canonicalJson } from "./canonical.js";
+import { canonicalJson, sha256Version } from "./canonical.js";
 import {
   DomainValidationError,
+  canonicalizeActions,
   canonicalizeAffiliations,
+  canonicalizeCapabilities,
+  canonicalizeResourceIds,
   createPrincipal,
   rejectUnknownKeys,
   requireRecord,
   timestampMillis,
-  validateCapability,
+  validateContextHash,
   validateIdentifier,
+  validatePrincipalType,
   validateTimestamp,
   validateUnverifiedMetadata,
   type Affiliation,
   type Principal,
+  type PrincipalType,
   type UnverifiedMetadata,
 } from "./domain.js";
 
-export interface Credential {
-  readonly version: 1;
+export interface AuthorityScope {
+  readonly capabilities: readonly string[];
+  readonly allowedActions: readonly string[];
+  readonly allowedResourceIds: readonly string[];
+}
+
+export interface Credential extends AuthorityScope {
+  readonly version: 2;
   readonly id: string;
   readonly issuerId: string;
   readonly principalId: string;
+  readonly principalType: PrincipalType;
   readonly affiliations: readonly Affiliation[];
-  readonly capabilities: readonly string[];
   readonly issuedAt: string;
   readonly expiresAt: string;
+  readonly scopeHash: string;
   readonly unverifiedMetadata?: UnverifiedMetadata;
 }
 
@@ -45,13 +57,40 @@ interface Revocation {
   readonly reason: string;
 }
 
-export interface IssueCredentialInput {
+export interface IssueCredentialInput extends AuthorityScope {
   readonly id: string;
   readonly principal: Principal;
-  readonly capabilities: readonly string[];
   readonly issuedAt: string;
   readonly expiresAt: string;
   readonly unverifiedMetadata?: UnverifiedMetadata;
+}
+
+function canonicalScope(value: unknown, label: string): AuthorityScope {
+  const record = requireRecord(value, label);
+  rejectUnknownKeys(
+    record,
+    ["capabilities", "allowedActions", "allowedResourceIds"],
+    label,
+  );
+  return Object.freeze({
+    capabilities: canonicalizeCapabilities(record.capabilities, `${label}.capabilities`),
+    allowedActions: canonicalizeActions(record.allowedActions, `${label}.allowedActions`),
+    allowedResourceIds: canonicalizeResourceIds(
+      record.allowedResourceIds,
+      `${label}.allowedResourceIds`,
+    ),
+  });
+}
+
+export function computeScopeHash(value: unknown): string {
+  const scope = canonicalScope(value, "scope");
+  return sha256Version({
+    domain: "zkyc-scope",
+    version: 1,
+    capabilities: scope.capabilities,
+    allowedActions: scope.allowedActions,
+    allowedResourceIds: scope.allowedResourceIds,
+  });
 }
 
 function validateCredential(value: unknown): Credential {
@@ -63,39 +102,47 @@ function validateCredential(value: unknown): Credential {
       "id",
       "issuerId",
       "principalId",
+      "principalType",
       "affiliations",
       "capabilities",
+      "allowedActions",
+      "allowedResourceIds",
       "issuedAt",
       "expiresAt",
+      "scopeHash",
       "unverifiedMetadata",
     ],
     "credential",
   );
-  if (record.version !== 1) throw new DomainValidationError("credential.version must be 1");
-  if (!Array.isArray(record.capabilities)) {
-    throw new DomainValidationError("credential.capabilities must be an array");
-  }
-  const capabilities = record.capabilities.map((capability, index) =>
-    validateCapability(capability, `credential.capabilities[${index}]`),
-  );
-  if (new Set(capabilities).size !== capabilities.length) {
-    throw new DomainValidationError("credential capabilities must be unique");
-  }
-  capabilities.sort();
+  if (record.version !== 2) throw new DomainValidationError("credential.version must be 2");
   const issuedAt = validateTimestamp(record.issuedAt, "credential.issuedAt");
   const expiresAt = validateTimestamp(record.expiresAt, "credential.expiresAt");
   if (timestampMillis(issuedAt) >= timestampMillis(expiresAt)) {
     throw new DomainValidationError("credential expiry must be after issuance");
   }
+  const scope = canonicalScope(
+    {
+      capabilities: record.capabilities,
+      allowedActions: record.allowedActions,
+      allowedResourceIds: record.allowedResourceIds,
+    },
+    "credential scope",
+  );
+  const scopeHash = validateContextHash(record.scopeHash, "credential.scopeHash");
+  if (scopeHash !== computeScopeHash(scope)) {
+    throw new DomainValidationError("credential.scopeHash does not match credential scope");
+  }
   const base = {
-    version: 1 as const,
+    version: 2 as const,
     id: validateIdentifier(record.id, "credential.id"),
     issuerId: validateIdentifier(record.issuerId, "credential.issuerId"),
     principalId: validateIdentifier(record.principalId, "credential.principalId"),
+    principalType: validatePrincipalType(record.principalType, "credential.principalType"),
     affiliations: canonicalizeAffiliations(record.affiliations, "credential.affiliations"),
-    capabilities: Object.freeze(capabilities),
+    ...scope,
     issuedAt,
     expiresAt,
+    scopeHash,
   };
   if (record.unverifiedMetadata === undefined) return Object.freeze(base);
   return Object.freeze({ ...base, unverifiedMetadata: validateUnverifiedMetadata(record.unverifiedMetadata) });
@@ -107,26 +154,47 @@ export class CredentialAuthority {
   readonly #revocations = new Map<string, Revocation>();
 
   constructor(input: { issuerId: string }) {
-    this.issuerId = validateIdentifier(input.issuerId, "issuerId");
+    const record = requireRecord(input, "credential authority input");
+    rejectUnknownKeys(record, ["issuerId"], "credential authority input");
+    this.issuerId = validateIdentifier(record.issuerId, "issuerId");
   }
 
   issueCredential(input: IssueCredentialInput): Credential {
     const inputRecord = requireRecord(input, "credential issuance input");
     rejectUnknownKeys(
       inputRecord,
-      ["id", "principal", "capabilities", "issuedAt", "expiresAt", "unverifiedMetadata"],
+      [
+        "id",
+        "principal",
+        "capabilities",
+        "allowedActions",
+        "allowedResourceIds",
+        "issuedAt",
+        "expiresAt",
+        "unverifiedMetadata",
+      ],
       "credential issuance input",
     );
     const principal = createPrincipal(inputRecord.principal);
+    const scope = canonicalScope(
+      {
+        capabilities: inputRecord.capabilities,
+        allowedActions: inputRecord.allowedActions,
+        allowedResourceIds: inputRecord.allowedResourceIds,
+      },
+      "credential scope",
+    );
     const candidate: Record<string, unknown> = {
-      version: 1,
+      version: 2,
       id: inputRecord.id,
       issuerId: this.issuerId,
       principalId: principal.id,
+      principalType: principal.type,
       affiliations: principal.affiliations,
-      capabilities: inputRecord.capabilities,
+      ...scope,
       issuedAt: inputRecord.issuedAt,
       expiresAt: inputRecord.expiresAt,
+      scopeHash: computeScopeHash(scope),
     };
     if (inputRecord.unverifiedMetadata !== undefined) {
       candidate.unverifiedMetadata = inputRecord.unverifiedMetadata;
@@ -144,13 +212,15 @@ export class CredentialAuthority {
     input: { revokedAt: string; reason: string },
   ): boolean {
     const id = validateIdentifier(credentialId, "credentialId");
+    const inputRecord = requireRecord(input, "credential revocation input");
+    rejectUnknownKeys(inputRecord, ["revokedAt", "reason"], "credential revocation input");
     const credential = this.#issued.get(id);
     if (credential === undefined || this.#revocations.has(id)) return false;
-    const revokedAt = validateTimestamp(input.revokedAt, "revokedAt");
+    const revokedAt = validateTimestamp(inputRecord.revokedAt, "revokedAt");
     if (timestampMillis(revokedAt) < timestampMillis(credential.issuedAt)) {
       throw new DomainValidationError("revocation cannot predate credential issuance");
     }
-    const reason = validateIdentifier(input.reason, "revocation reason");
+    const reason = validateIdentifier(inputRecord.reason, "revocation reason");
     this.#revocations.set(id, Object.freeze({ revokedAt, reason }));
     return true;
   }
@@ -191,21 +261,30 @@ export class CredentialAuthority {
     credentialId: unknown,
     at: unknown,
     expectedPrincipalId?: unknown,
+    expectedPrincipalType?: unknown,
   ): CredentialStatus {
     let id: string;
     let checkedAt: string;
     let subjectId: string | undefined;
+    let subjectType: PrincipalType | undefined;
     try {
       id = validateIdentifier(credentialId, "credentialId");
       checkedAt = validateTimestamp(at, "credential check time");
       if (expectedPrincipalId !== undefined) {
         subjectId = validateIdentifier(expectedPrincipalId, "expectedPrincipalId");
       }
+      if (expectedPrincipalType !== undefined) {
+        subjectType = validatePrincipalType(expectedPrincipalType, "expectedPrincipalType");
+      }
     } catch {
       return { valid: false, code: "CREDENTIAL_MALFORMED" };
     }
     const credential = this.#issued.get(id);
-    if (credential === undefined || (subjectId !== undefined && credential.principalId !== subjectId)) {
+    if (
+      credential === undefined ||
+      (subjectId !== undefined && credential.principalId !== subjectId) ||
+      (subjectType !== undefined && credential.principalType !== subjectType)
+    ) {
       return { valid: false, code: "CREDENTIAL_UNKNOWN" };
     }
     return this.#statusAt(credential, checkedAt);

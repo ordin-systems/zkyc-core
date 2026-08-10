@@ -3,6 +3,7 @@ export {
   REASON_CODES,
   ActionSensitivity,
   DomainValidationError,
+  PrincipalType,
   createPrincipal,
   validateAction,
   validateCapability,
@@ -15,11 +16,23 @@ export {
 export { canonicalJson, sha256Version } from "./canonical.js";
 export {
   CredentialAuthority,
+  computeScopeHash,
+  type AuthorityScope,
   type Credential,
   type CredentialStatus,
   type CredentialStatusCode,
   type IssueCredentialInput,
 } from "./credentials.js";
+export {
+  DelegationAuthority,
+  DelegationValidationError,
+  computeDelegationBindingHash,
+  type CapabilityDelegation,
+  type DelegationStatus,
+  type DelegationStatusCode,
+  type DelegationValidationCode,
+  type IssueDelegationInput,
+} from "./delegations.js";
 export {
   createPolicy,
   type CreatePolicyInput,

@@ -1,6 +1,6 @@
 {
   "name": "@ordin/zkyc-core-reference",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Deterministic zKYC authority core with sanitized full-stack reference adapters",
   "license": "UNLICENSED",

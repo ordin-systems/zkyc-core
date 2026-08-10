@@ -4,10 +4,15 @@ import test from "node:test";
 import {
   ActionSensitivity,
   CredentialAuthority,
+  DelegationAuthority,
+  DelegationValidationError,
   DomainValidationError,
   HumanStepUpService,
   InMemoryAtomicNonceStore,
+  PrincipalType,
   canonicalJson,
+  computeDelegationBindingHash,
+  computeScopeHash,
   createPolicy,
   createPrincipal,
   evaluateAccess,
@@ -16,8 +21,10 @@ import {
   verifyAndConsumeReceipt,
   verifyReceipt,
   type AccessDecision,
+  type CapabilityDelegation,
   type Credential,
   type PermissionRule,
+  type Policy,
   type Principal,
   type ReceiptExpectedBinding,
   type ReceiptPayload,
@@ -36,6 +43,8 @@ const REVIEWER_AFFILIATION = Object.freeze({ organizationId: "organization:ordin
 interface HarnessOptions {
   principal?: Principal;
   credentialCapabilities?: readonly string[];
+  credentialAllowedActions?: readonly string[];
+  credentialAllowedResourceIds?: readonly string[];
   credentialExpiresAt?: string;
   metadata?: { readonly zkPassProofId?: string; readonly contextualProofIds?: readonly string[] };
   rules?: readonly {
@@ -52,12 +61,23 @@ function createHarness(options: HarnessOptions = {}) {
   const authority = new CredentialAuthority({ issuerId: "issuer:ordin" });
   const principal = options.principal ?? createPrincipal({
     id: "principal:alice",
+    type: PrincipalType.HUMAN,
     affiliations: [MEMBER_AFFILIATION],
   });
   const credential = authority.issueCredential({
     id: "credential:alice",
     principal,
     capabilities: options.credentialCapabilities ?? ["records:read", "records:export"],
+    allowedActions: options.credentialAllowedActions ?? [
+      "records:delete",
+      "records:export",
+      "records:publish",
+      "records:read",
+    ],
+    allowedResourceIds: options.credentialAllowedResourceIds ?? [
+      "dataset:7",
+      "record:customer-7",
+    ],
     issuedAt: ISSUED_AT,
     expiresAt: options.credentialExpiresAt ?? EXPIRES_AT,
     ...(options.metadata === undefined ? {} : { unverifiedMetadata: options.metadata }),
@@ -158,16 +178,81 @@ function expectedReceiptBinding(decision: AccessDecision) {
 function createApprover(authority: CredentialAuthority, capabilities = ["approval:records-export"]) {
   const principal = createPrincipal({
     id: "principal:bob",
+    type: PrincipalType.HUMAN,
     affiliations: [REVIEWER_AFFILIATION],
   });
   const credential = authority.issueCredential({
     id: "credential:bob",
     principal,
     capabilities,
+    allowedActions: ["step-up:resolve"],
+    allowedResourceIds: ["step-up:requests"],
     issuedAt: ISSUED_AT,
     expiresAt: EXPIRES_AT,
   });
   return { principal, credential };
+}
+
+function createDelegationHarness(input: {
+  readonly delegationIssuedAt?: string;
+  readonly delegationExpiresAt?: string;
+  readonly policy?: Policy;
+} = {}) {
+  const credentialAuthority = new CredentialAuthority({ issuerId: "issuer:ordin" });
+  const grantor = createPrincipal({
+    id: "principal:grantor",
+    type: PrincipalType.ORGANIZATION,
+    affiliations: [MEMBER_AFFILIATION],
+  });
+  const delegate = createPrincipal({
+    id: "principal:delegate-agent",
+    type: PrincipalType.AGENT,
+    affiliations: [],
+  });
+  const grantorCredential = credentialAuthority.issueCredential({
+    id: "credential:grantor",
+    principal: grantor,
+    capabilities: ["records:write", "records:read"],
+    allowedActions: ["records:write", "records:read"],
+    allowedResourceIds: ["record:2", "record:1"],
+    issuedAt: ISSUED_AT,
+    expiresAt: EXPIRES_AT,
+  });
+  const policy = input.policy ?? createPolicy({
+    id: "policy:delegated-reference",
+    rules: [{
+      action: "records:read",
+      actionSensitivity: ActionSensitivity.ROUTINE,
+      requiredCapabilities: ["records:read"],
+      requiredAffiliations: [],
+      effect: "ALLOW",
+    }],
+  });
+  const delegationAuthority = new DelegationAuthority({
+    issuerId: "delegation-issuer:ordin",
+    credentialAuthority,
+  });
+  const delegation = delegationAuthority.issueDelegation({
+    id: "delegation:grantor-to-agent",
+    grantor,
+    grantorCredential,
+    delegate,
+    policy,
+    capabilities: ["records:read"],
+    allowedActions: ["records:read"],
+    allowedResourceIds: ["record:1"],
+    issuedAt: input.delegationIssuedAt ?? ISSUED_AT,
+    expiresAt: input.delegationExpiresAt ?? EXPIRES_AT,
+  });
+  return {
+    credentialAuthority,
+    grantor,
+    delegate,
+    grantorCredential,
+    policy,
+    delegationAuthority,
+    delegation,
+  };
 }
 
 test("1 deterministic ALLOW binds credential affiliations, sensitivity, resource, context and policy", () => {
@@ -199,6 +284,7 @@ test("2 required affiliation is enforced and caller-injected affiliation cannot 
 
   const injectedPrincipal = createPrincipal({
     id: missingHarness.principal.id,
+    type: missingHarness.principal.type,
     affiliations: [MEMBER_AFFILIATION, REVIEWER_AFFILIATION],
   });
   const injected = evaluate(missingHarness, { principal: injectedPrincipal });
@@ -207,7 +293,11 @@ test("2 required affiliation is enforced and caller-injected affiliation cannot 
 });
 
 test("3 matching credential-bound affiliation permits evaluation", () => {
-  const reviewer = createPrincipal({ id: "principal:reviewer", affiliations: [REVIEWER_AFFILIATION] });
+  const reviewer = createPrincipal({
+    id: "principal:reviewer",
+    type: PrincipalType.HUMAN,
+    affiliations: [REVIEWER_AFFILIATION],
+  });
   const harness = createHarness({
     principal: reviewer,
     rules: [{
@@ -420,11 +510,17 @@ test("9 unauthorized, rejected and expired step-up paths fail closed", async () 
     { ok: false, reasonCode: "APPROVER_CAPABILITY_MISSING" },
   );
 
-  const authorized = createPrincipal({ id: "principal:carol", affiliations: [REVIEWER_AFFILIATION] });
+  const authorized = createPrincipal({
+    id: "principal:carol",
+    type: PrincipalType.HUMAN,
+    affiliations: [REVIEWER_AFFILIATION],
+  });
   const authorizedCredential = harness.authority.issueCredential({
     id: "credential:carol",
     principal: authorized,
     capabilities: ["approval:records-export"],
+    allowedActions: ["step-up:resolve"],
+    allowedResourceIds: ["step-up:requests"],
     issuedAt: ISSUED_AT,
     expiresAt: EXPIRES_AT,
   });
@@ -737,6 +833,8 @@ test("19 zkPassProofId remains unverified metadata and does not affect authority
       id: "credential:bad-metadata",
       principal: harness.principal,
       capabilities: ["records:read"],
+      allowedActions: ["records:read"],
+      allowedResourceIds: ["record:customer-7"],
       issuedAt: ISSUED_AT,
       expiresAt: EXPIRES_AT,
       unverifiedMetadata: { verified: true } as never,
@@ -766,6 +864,8 @@ interface FixtureCase {
   readonly credential: {
     readonly id: string;
     readonly capabilities: readonly string[];
+    readonly allowedActions: readonly string[];
+    readonly allowedResourceIds: readonly string[];
     readonly issuedAt: string;
     readonly expiresAt: string;
     readonly unverifiedMetadata?: { readonly zkPassProofId?: string };
@@ -788,6 +888,8 @@ test("21 checked-in fixtures execute through the public API", async () => {
       id: fixture.credential.id,
       principal,
       capabilities: fixture.credential.capabilities,
+      allowedActions: fixture.credential.allowedActions,
+      allowedResourceIds: fixture.credential.allowedResourceIds,
       issuedAt: fixture.credential.issuedAt,
       expiresAt: fixture.credential.expiresAt,
       ...(fixture.credential.unverifiedMetadata === undefined
@@ -814,4 +916,230 @@ test("22 canonical JSON preserves __proto__ as data and prevents context-hash co
   const withProtoKey = JSON.parse('{"__proto__":{"admin":true}}') as Record<string, unknown>;
   assert.equal(canonicalJson(withProtoKey), '{"__proto__":{"admin":true}}');
   assert.notEqual(sha256Version(withProtoKey), sha256Version({}));
+});
+
+test("23 principal type is exact, required and unknown-field fail-closed", () => {
+  for (const type of [PrincipalType.HUMAN, PrincipalType.ORGANIZATION, PrincipalType.AGENT]) {
+    assert.equal(createPrincipal({ id: `principal:${type.toLowerCase()}`, type, affiliations: [] }).type, type);
+  }
+  assert.throws(
+    () => createPrincipal({ id: "principal:missing-type", affiliations: [] }),
+    DomainValidationError,
+  );
+  assert.throws(
+    () => createPrincipal({ id: "principal:bad-type", type: "SERVICE", affiliations: [] }),
+    DomainValidationError,
+  );
+  assert.throws(
+    () => createPrincipal({
+      id: "principal:unknown-field",
+      type: PrincipalType.AGENT,
+      affiliations: [],
+      trusted: true,
+    }),
+    DomainValidationError,
+  );
+});
+
+test("24 credential v2 canonicalizes and independently hashes exact deny-all-capable scope", () => {
+  const authority = new CredentialAuthority({ issuerId: "issuer:scope" });
+  const principal = createPrincipal({
+    id: "principal:scope",
+    type: PrincipalType.AGENT,
+    affiliations: [
+      { organizationId: "organization:z", role: "member" },
+      { organizationId: "organization:A", role: "member" },
+    ],
+  });
+  const credential = authority.issueCredential({
+    id: "credential:scope",
+    principal,
+    capabilities: ["records:a", "Records:Z"],
+    allowedActions: ["records:a", "Records:Z"],
+    allowedResourceIds: ["resource:a", "resource:Z"],
+    issuedAt: ISSUED_AT,
+    expiresAt: EXPIRES_AT,
+  });
+  assert.equal(credential.version, 2);
+  assert.deepEqual(
+    [credential.principalId, credential.principalType],
+    [principal.id, PrincipalType.AGENT],
+  );
+  assert.deepEqual(credential.affiliations, [
+    { organizationId: "organization:A", role: "member" },
+    { organizationId: "organization:z", role: "member" },
+  ]);
+  assert.deepEqual(credential.capabilities, ["Records:Z", "records:a"]);
+  assert.deepEqual(credential.allowedActions, ["Records:Z", "records:a"]);
+  assert.deepEqual(credential.allowedResourceIds, ["resource:Z", "resource:a"]);
+  assert.equal(credential.scopeHash, computeScopeHash({
+    capabilities: ["records:a", "Records:Z"],
+    allowedActions: ["records:a", "Records:Z"],
+    allowedResourceIds: ["resource:a", "resource:Z"],
+  }));
+  assert.equal(credential.scopeHash, sha256Version({
+    domain: "zkyc-scope",
+    version: 1,
+    capabilities: ["Records:Z", "records:a"],
+    allowedActions: ["Records:Z", "records:a"],
+    allowedResourceIds: ["resource:Z", "resource:a"],
+  }));
+
+  const denyAll = authority.issueCredential({
+    id: "credential:deny-all",
+    principal,
+    capabilities: [],
+    allowedActions: [],
+    allowedResourceIds: [],
+    issuedAt: ISSUED_AT,
+    expiresAt: EXPIRES_AT,
+  });
+  assert.deepEqual(
+    [denyAll.capabilities, denyAll.allowedActions, denyAll.allowedResourceIds],
+    [[], [], []],
+  );
+  assert.deepEqual(authority.checkCredential(denyAll, DECIDED_AT), { valid: true, code: "ACTIVE" });
+  assert.deepEqual(
+    authority.checkCredentialById(credential.id, DECIDED_AT, principal.id, PrincipalType.HUMAN),
+    { valid: false, code: "CREDENTIAL_UNKNOWN" },
+  );
+
+  const base = {
+    id: "credential:invalid",
+    principal,
+    capabilities: ["records:read"],
+    allowedActions: ["records:read"],
+    allowedResourceIds: ["record:1"],
+    issuedAt: ISSUED_AT,
+    expiresAt: EXPIRES_AT,
+  };
+  for (const invalid of [
+    { ...base, allowedActions: undefined },
+    { ...base, capabilities: ["records:read", "records:read"] },
+    { ...base, allowedActions: ["records:read", "records:read"] },
+    { ...base, allowedResourceIds: ["record:1", "record:1"] },
+    { ...base, capabilities: ["*"] },
+    { ...base, allowedActions: ["records:*"] },
+    { ...base, allowedResourceIds: ["*"] },
+    { ...base, issuedAt: "2026-06-01T00:00:00Z" },
+    { ...base, unsupported: true },
+  ]) {
+    assert.throws(() => authority.issueCredential(invalid as never), DomainValidationError);
+  }
+  assert.throws(
+    () => authority.issueCredential({
+      ...base,
+      principal: {
+        ...principal,
+        affiliations: [principal.affiliations[0], principal.affiliations[0]],
+      } as Principal,
+    }),
+    DomainValidationError,
+  );
+  assert.deepEqual(
+    authority.checkCredential({ ...credential, scopeHash: `sha256:${"0".repeat(64)}` }, DECIDED_AT),
+    { valid: false, code: "CREDENTIAL_MALFORMED" },
+  );
+});
+
+test("25 delegation issuance binds authority, root identity, policy, attenuated scope and time", () => {
+  const harness = createDelegationHarness();
+  const { delegation } = harness;
+  assert.equal(delegation.version, 1);
+  assert.equal(delegation.issuerId, harness.delegationAuthority.issuerId);
+  assert.equal(delegation.grantorCredentialId, harness.grantorCredential.id);
+  assert.deepEqual(
+    [delegation.grantorId, delegation.grantorType],
+    [harness.grantor.id, harness.grantor.type],
+  );
+  assert.deepEqual(
+    [delegation.delegateId, delegation.delegateType],
+    [harness.delegate.id, harness.delegate.type],
+  );
+  assert.deepEqual(
+    [delegation.policyId, delegation.policyVersion],
+    [harness.policy.id, harness.policy.version],
+  );
+  assert.deepEqual(delegation.capabilities, ["records:read"]);
+  assert.deepEqual(delegation.allowedActions, ["records:read"]);
+  assert.deepEqual(delegation.allowedResourceIds, ["record:1"]);
+  assert.equal(delegation.scopeHash, computeScopeHash({
+    capabilities: delegation.capabilities,
+    allowedActions: delegation.allowedActions,
+    allowedResourceIds: delegation.allowedResourceIds,
+  }));
+  assert.equal(delegation.delegationBindingHash, computeDelegationBindingHash(delegation));
+
+  const base = {
+    id: "delegation:invalid",
+    grantor: harness.grantor,
+    grantorCredential: harness.grantorCredential,
+    delegate: harness.delegate,
+    policy: harness.policy,
+    capabilities: ["records:read"],
+    allowedActions: ["records:read"],
+    allowedResourceIds: ["record:1"],
+    issuedAt: DECIDED_AT,
+    expiresAt: EXPIRES_AT,
+  };
+  const expectCode = (input: unknown, code: string) => {
+    assert.throws(
+      () => harness.delegationAuthority.issueDelegation(input as never),
+      (error: unknown) => error instanceof DelegationValidationError && error.code === code,
+    );
+  };
+  for (const axis of ["capabilities", "allowedActions", "allowedResourceIds"] as const) {
+    expectCode({ ...base, [axis]: [] }, "DELEGATION_MALFORMED");
+  }
+  expectCode({ ...base, capabilities: ["records:export"] }, "DELEGATION_SCOPE_ESCALATION");
+  expectCode({ ...base, allowedActions: ["records:export"] }, "DELEGATION_SCOPE_ESCALATION");
+  expectCode({ ...base, allowedResourceIds: ["record:9"] }, "DELEGATION_SCOPE_ESCALATION");
+  expectCode({ ...base, capabilities: ["records:read", "records:read"] }, "DELEGATION_MALFORMED");
+  expectCode({ ...base, issuerId: "caller:forged" }, "DELEGATION_MALFORMED");
+  expectCode({ ...base, grantorDelegation: delegation }, "DELEGATION_MALFORMED");
+  expectCode({ ...base, grantorCredential: delegation }, "DELEGATION_GRANTOR_CREDENTIAL_INVALID");
+  expectCode({
+    ...base,
+    grantorCredential: { ...harness.grantorCredential, allowedActions: ["records:read"] },
+  }, "DELEGATION_GRANTOR_CREDENTIAL_INVALID");
+  expectCode({
+    ...base,
+    grantor: createPrincipal({
+      id: "principal:other",
+      type: PrincipalType.ORGANIZATION,
+      affiliations: [],
+    }),
+  }, "DELEGATION_GRANTOR_MISMATCH");
+  expectCode({ ...base, expiresAt: DECIDED_AT }, "DELEGATION_TIME_INVALID");
+  expectCode({ ...base, expiresAt: "2026-06-01T02:00:00.000Z" }, "DELEGATION_TIME_INVALID");
+  expectCode({ ...base, issuedAt: "2026-06-01T00:10:00Z" }, "DELEGATION_MALFORMED");
+  expectCode({
+    ...base,
+    policy: { ...harness.policy, version: `sha256:${"0".repeat(64)}` },
+  }, "DELEGATION_POLICY_INVALID");
+
+  const redelegationAuthority = new CredentialAuthority({ issuerId: "issuer:redelegation" });
+  const redelegationGrantorCredential = redelegationAuthority.issueCredential({
+    id: "credential:redelegation",
+    principal: harness.grantor,
+    capabilities: ["delegation:issue"],
+    allowedActions: ["records:read"],
+    allowedResourceIds: ["record:1"],
+    issuedAt: ISSUED_AT,
+    expiresAt: EXPIRES_AT,
+  });
+  const redelegation = new DelegationAuthority({
+    issuerId: "delegation-issuer:redelegation",
+    credentialAuthority: redelegationAuthority,
+  });
+  assert.throws(
+    () => redelegation.issueDelegation({
+      ...base,
+      id: "delegation:redelegation",
+      grantorCredential: redelegationGrantorCredential,
+      capabilities: ["delegation:issue"],
+    }),
+    (error: unknown) => error instanceof DelegationValidationError &&
+      error.code === "DELEGATION_REDELEGATION_NOT_ALLOWED",
+  );
 });
