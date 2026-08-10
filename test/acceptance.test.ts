@@ -1806,6 +1806,13 @@ test("25 delegation issuance binds authority, root identity, policy, attenuated 
       affiliations: [],
     }),
   }, "DELEGATION_GRANTOR_MISMATCH");
+  expectCode({
+    ...base,
+    grantor: createPrincipal({
+      ...harness.grantor,
+      affiliations: [{ organizationId: "organization:forged", role: "admin" }],
+    }),
+  }, "DELEGATION_GRANTOR_MISMATCH");
   expectCode({ ...base, expiresAt: DECIDED_AT }, "DELEGATION_TIME_INVALID");
   expectCode({ ...base, expiresAt: "2026-06-01T02:00:00.000Z" }, "DELEGATION_TIME_INVALID");
   expectCode({ ...base, issuedAt: "2026-06-01T00:10:00Z" }, "DELEGATION_MALFORMED");

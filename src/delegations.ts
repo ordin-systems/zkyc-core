@@ -333,11 +333,12 @@ export class DelegationAuthority {
       }
       if (
         grantorCredential.principalId !== grantor.id ||
-        grantorCredential.principalType !== grantor.type
+        grantorCredential.principalType !== grantor.type ||
+        canonicalJson(grantorCredential.affiliations) !== canonicalJson(grantor.affiliations)
       ) {
         throw new DelegationValidationError(
           "DELEGATION_GRANTOR_MISMATCH",
-          "grantor identity tuple does not match grantor credential",
+          "grantor identity and affiliations do not exactly match grantor credential",
         );
       }
       if (timestampMillis(expiresAt) > timestampMillis(grantorCredential.expiresAt)) {

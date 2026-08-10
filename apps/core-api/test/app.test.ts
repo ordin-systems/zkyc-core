@@ -481,6 +481,24 @@ test("delegation issuance, delegated receipt consumption, and revocation stay au
   assert.equal(artifacts.delegation.delegateType, PrincipalType.AGENT);
   assert.deepEqual(artifacts.delegation.capabilities, ["records:read"]);
 
+  const substitutedGrantor = await requestJson(app, "/delegations", {
+    method: "POST",
+    body: {
+      grantor: {
+        ...principalFor(artifacts.grantorCredential),
+        affiliations: [{ organizationId: "organization:forged", role: "admin" }],
+      },
+      grantorCredential: artifacts.grantorCredential,
+      delegate: principalFor(artifacts.delegateIdentityCredential),
+      policy: policy("ALLOW", "records:read"),
+      capabilities: ["records:read"],
+      allowedActions: ["records:read"],
+      allowedResourceIds: [RESOURCE],
+      expiresAt: RECEIPT_EXPIRY,
+    },
+  });
+  assert.equal(substitutedGrantor.response.status, 400);
+
   const evaluated = await evaluateDelegated(
     app,
     artifacts.delegateIdentityCredential,
