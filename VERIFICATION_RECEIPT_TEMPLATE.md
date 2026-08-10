@@ -41,6 +41,7 @@ If the environment requires it, record `npx playwright install chromium` separat
 | Operator UI |  |  |
 | zkYA component |  |  |
 | Scanner regression |  |  |
+| Release-tooling regression |  |  |
 | Chromium E2E |  |  |
 
 Do not count format, security, typecheck, build, package, or audit gates as tests.

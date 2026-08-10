@@ -53,13 +53,21 @@ function isZeroBlock(block) {
   return block.every((value) => value === 0);
 }
 
-export function parseTarGz(compressed, label = "archive") {
+export function parseTarGz(compressed, label = "archive", options = {}) {
+  const maximumOutputLength = Math.min(options.maximumOutputLength ?? maximumArchiveSize, maximumArchiveSize);
+  if (!Number.isSafeInteger(maximumOutputLength) || maximumOutputLength <= 0) {
+    throw new Error(`${label} has an invalid decompressed size limit`);
+  }
   let tar;
   try {
-    tar = gunzipSync(compressed, { maxOutputLength: maximumArchiveSize });
+    tar = gunzipSync(compressed, { maxOutputLength: maximumOutputLength });
   } catch (error) {
+    if (error.code === "ERR_BUFFER_TOO_LARGE") {
+      throw new Error(`${label} exceeds its bounded decompressed archive size`);
+    }
     throw new Error(`${label} is not a valid bounded gzip archive: ${error.message}`);
   }
+  options.onDecompressedSize?.(tar.length);
   if (tar.length < blockSize * 2 || tar.length % blockSize !== 0) {
     throw new Error(`${label} has a malformed tar length`);
   }
@@ -101,8 +109,13 @@ export function parseTarGz(compressed, label = "archive") {
     const contentStart = offset + blockSize;
     const contentEnd = contentStart + size;
     if (contentEnd > tar.length) throw new Error(`${label} member is truncated: ${name}`);
+    const paddedEnd = contentStart + (Math.ceil(size / blockSize) * blockSize);
+    if (paddedEnd > tar.length) throw new Error(`${label} member padding is truncated: ${name}`);
+    for (let index = contentEnd; index < paddedEnd; index += 1) {
+      if (tar[index] !== 0) throw new Error(`${label} has nonzero tar member padding: ${name}`);
+    }
     entries.push({ name, type, mode, content: Buffer.from(tar.subarray(contentStart, contentEnd)) });
-    offset = contentStart + (Math.ceil(size / blockSize) * blockSize);
+    offset = paddedEnd;
   }
   if (!foundTerminator) throw new Error(`${label} has no tar terminator`);
   if (entries.length === 0) throw new Error(`${label} contains no members`);

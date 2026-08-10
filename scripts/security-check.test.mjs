@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { scanPublication } from "./security-check.mjs";
 
 const scanner = fileURLToPath(new URL("./security-check.mjs", import.meta.url));
 const archiveUtils = fileURLToPath(new URL("./archive-utils.mjs", import.meta.url));
@@ -28,7 +29,9 @@ function tarArchive(entries) {
     header.write("00", 263, 2, "ascii");
     const checksum = header.reduce((sum, value) => sum + value, 0);
     header.write(`${checksum.toString(8).padStart(6, "0")}\0 `, 148, 8, "ascii");
-    blocks.push(header, content, Buffer.alloc((512 - (content.length % 512)) % 512));
+    const padding = Buffer.alloc((512 - (content.length % 512)) % 512);
+    if (entry.padding !== undefined) Buffer.from(entry.padding).copy(padding);
+    blocks.push(header, content, padding);
   }
   blocks.push(Buffer.alloc(1024));
   return gzipSync(Buffer.concat(blocks));
@@ -82,15 +85,74 @@ test("publication scanner rejects nested symlinks, generated caches, bytecode, a
 test("publication scanner fails closed on malformed, unsafe, and secret-bearing tgz exports", async () => {
   await withDirectory(async (directory) => {
     const token = `${"sk-"}${"B".repeat(24)}`;
+    const paddingToken = `${"gh"}${"p_"}${"P".repeat(24)}`;
     await writeFile(join(directory, "malformed.tgz"), "not gzip", "utf8");
     await writeFile(join(directory, "traversal.tgz"), tarArchive([{ name: "../escape", content: "clean" }]));
     await writeFile(join(directory, "link.tgz"), tarArchive([{ name: "package/link", type: "2" }]));
     await writeFile(join(directory, "export.tgz"), tarArchive([{ name: "package/nested/.credentials", content: token }]));
+    await writeFile(join(directory, "bad-padding.tgz"), tarArchive([
+      { name: "package/clean.txt", content: "x", padding: paddingToken },
+    ]));
     const result = scan(directory);
     assert.equal(result.status, 1);
-    for (const name of ["malformed.tgz", "traversal.tgz", "link.tgz", "export.tgz"]) {
+    for (const name of ["malformed.tgz", "traversal.tgz", "link.tgz", "export.tgz", "bad-padding.tgz"]) {
       assert.match(output(result), new RegExp(name.replace(".", "\\.")));
     }
+    assert.match(output(result), /bad-padding\.tgz: .*nonzero tar member padding/);
+  });
+});
+
+test("publication scanner recursively scans nested tgz members without treating compressed bytes as text", async () => {
+  await withDirectory(async (directory) => {
+    const token = `${"sk-"}${"N".repeat(24)}`;
+    const nested = tarArchive([
+      { name: "package/.env", content: "clean=true\n" },
+      { name: "package/extensionless", content: token },
+    ]);
+    await writeFile(join(directory, "outer.tgz"), tarArchive([
+      { name: "package/nested.tgz", content: nested },
+    ]));
+
+    const result = scan(directory);
+    assert.equal(result.status, 1);
+    assert.match(output(result), /outer\.tgz!\/package\/nested\.tgz!\/package\/\.env: forbidden sensitive filename/);
+    assert.match(output(result), /outer\.tgz!\/package\/nested\.tgz!\/package\/extensionless: OpenAI-style secret/);
+  });
+});
+
+test("publication scanner fails closed on malformed, over-depth, and over-budget nested tgz members", async () => {
+  await withDirectory(async (directory) => {
+    await writeFile(join(directory, "malformed-nested.tgz"), tarArchive([
+      { name: "package/nested.tgz", content: "not gzip" },
+    ]));
+    const malformedFailures = await scanPublication(directory);
+    assert.ok(malformedFailures.some((failure) =>
+      failure.includes("malformed-nested.tgz!/package/nested.tgz") && failure.includes("not a valid bounded gzip archive")));
+
+    await rm(join(directory, "malformed-nested.tgz"));
+    const deepest = tarArchive([{ name: "package/clean.txt", content: "clean" }]);
+    const middle = tarArchive([{ name: "package/deeper.tgz", content: deepest }]);
+    await writeFile(join(directory, "over-depth.tgz"), tarArchive([{ name: "package/nested.tgz", content: middle }]));
+    const depthFailures = await scanPublication(directory, { maximumArchiveDepth: 1 });
+    assert.ok(depthFailures.some((failure) =>
+      failure.includes("over-depth.tgz!/package/nested.tgz!/package/deeper.tgz") && failure.includes("nesting depth")));
+
+    await rm(join(directory, "over-depth.tgz"));
+    const nested = tarArchive([{ name: "package/clean.txt", content: "x".repeat(2_048) }]);
+    await writeFile(join(directory, "over-budget.tgz"), tarArchive([{ name: "package/nested.tgz", content: nested }]));
+    const budgetFailures = await scanPublication(directory, {
+      maximumCumulativeDecompressedBytes: 10_000,
+      maximumCumulativeMemberBytes: 1_024,
+    });
+    assert.ok(budgetFailures.some((failure) =>
+      failure.includes("over-budget.tgz") && failure.includes("member-byte budget")));
+
+    const decompressedBudgetFailures = await scanPublication(directory, {
+      maximumCumulativeDecompressedBytes: 1_024,
+      maximumCumulativeMemberBytes: 10_000,
+    });
+    assert.ok(decompressedBudgetFailures.some((failure) =>
+      failure.includes("over-budget.tgz") && failure.includes("decompressed-byte budget")));
   });
 });
 

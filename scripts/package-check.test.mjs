@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { parseTarGz } from "./archive-utils.mjs";
 import { inspectPackageArchive, verifyUiBuild } from "./package-check.mjs";
 import { readManifest } from "./package-utils.mjs";
@@ -118,6 +118,20 @@ test("manifest and archive parsers fail closed on malformed input", async () => 
       /unsafe path/,
     );
   });
+});
+
+test("archive parser accepts zero member padding and rejects nonzero member padding", () => {
+  const valid = tarArchive([{ name: "package/file.txt", content: "x" }]);
+  assert.equal(parseTarGz(valid, "valid-padding.tgz")[0]?.content.toString("utf8"), "x");
+
+  const malformedTar = gunzipSync(valid);
+  const paddingToken = Buffer.from(`${"sk-"}${"Q".repeat(24)}`, "utf8");
+  paddingToken.copy(malformedTar, 513);
+  const malformed = gzipSync(malformedTar);
+  assert.throws(
+    () => parseTarGz(malformed, "nonzero-padding.tgz"),
+    /nonzero-padding\.tgz has nonzero tar member padding: package\/file\.txt/,
+  );
 });
 
 test("package inspection rejects malformed packed manifests and stale dist members", async () => {

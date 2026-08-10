@@ -27,6 +27,11 @@ const textExtensions = new Set([
 ]);
 const codeExtensions = new Set([".js", ".jsx", ".mjs", ".mts", ".ts", ".tsx"]);
 const codeRoots = ["src", "apps", "packages"];
+const defaultArchiveLimits = Object.freeze({
+  maximumArchiveDepth: 3,
+  maximumCumulativeDecompressedBytes: 256 * 1024 * 1024,
+  maximumCumulativeMemberBytes: 256 * 1024 * 1024,
+});
 const forbiddenPatterns = [
   { label: "absolute macOS private path", pattern: /\/Users\/[A-Za-z0-9._-]+\// },
   { label: "absolute Windows private path", pattern: /[A-Za-z]:\\Users\\[^\\]+\\/ },
@@ -75,14 +80,48 @@ async function readRegularFile(path) {
   }
 }
 
-function scanArchive(content, display, failures) {
-  let entries;
-  try {
-    entries = parseTarGz(content, display);
-  } catch (error) {
-    failures.push(`${display}: ${error.message}`);
+function archiveLimits(options) {
+  const limits = { ...defaultArchiveLimits };
+  for (const [name, minimum] of [
+    ["maximumArchiveDepth", 0],
+    ["maximumCumulativeDecompressedBytes", 1],
+    ["maximumCumulativeMemberBytes", 1],
+  ]) {
+    const value = options[name] ?? limits[name];
+    if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`invalid archive scanner limit: ${name}`);
+    limits[name] = value;
+  }
+  return limits;
+}
+
+function scanArchive(content, display, failures, limits, budget, depth) {
+  const remainingDecompressedBytes = limits.maximumCumulativeDecompressedBytes - budget.decompressedBytes;
+  if (remainingDecompressedBytes <= 0) {
+    failures.push(`${display}: cumulative archive decompressed-byte budget exceeded`);
     return;
   }
+  let entries;
+  try {
+    entries = parseTarGz(content, display, {
+      maximumOutputLength: remainingDecompressedBytes,
+      onDecompressedSize(size) {
+        budget.decompressedBytes += size;
+      },
+    });
+  } catch (error) {
+    failures.push(error.message.includes("exceeds its bounded decompressed archive size")
+      ? `${display}: cumulative archive decompressed-byte budget exceeded`
+      : `${display}: ${error.message}`);
+    return;
+  }
+
+  const memberBytes = entries.reduce((total, entry) => total + entry.content.length, 0);
+  if (memberBytes > limits.maximumCumulativeMemberBytes - budget.memberBytes) {
+    failures.push(`${display}: cumulative archive member-byte budget exceeded`);
+    return;
+  }
+  budget.memberBytes += memberBytes;
+
   for (const entry of entries) {
     const memberDisplay = `${display}!/${entry.name}`;
     const memberFilename = basename(entry.name);
@@ -102,6 +141,14 @@ function scanArchive(content, display, failures) {
       failures.push(`${memberDisplay}: generated cache is forbidden`);
       continue;
     }
+    if (entry.type === "file" && memberFilename.toLowerCase().endsWith(".tgz")) {
+      if (depth >= limits.maximumArchiveDepth) {
+        failures.push(`${memberDisplay}: archive nesting depth exceeds maximum ${limits.maximumArchiveDepth}`);
+      } else {
+        scanArchive(entry.content, memberDisplay, failures, limits, budget, depth + 1);
+      }
+      continue;
+    }
     if (entry.type === "file") scanContent(entry.content, memberDisplay, failures, true);
   }
 }
@@ -116,9 +163,10 @@ async function isValidRootGitPointer(root, content) {
   }
 }
 
-export async function scanPublication(requestedRoot) {
+export async function scanPublication(requestedRoot, options = {}) {
   const root = resolve(requestedRoot);
   const failures = [];
+  const limits = archiveLimits(options);
 
   async function walk(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -170,7 +218,9 @@ export async function scanPublication(requestedRoot) {
         if (!await isValidRootGitPointer(root, content)) failures.push(`${display}: malformed gitdir administrative pointer`);
         continue;
       }
-      if (filename.toLowerCase().endsWith(".tgz")) scanArchive(content, display, failures);
+      if (filename.toLowerCase().endsWith(".tgz")) {
+        scanArchive(content, display, failures, limits, { decompressedBytes: 0, memberBytes: 0 }, 0);
+      }
       else scanContent(content, display, failures);
     }
   }
