@@ -12,6 +12,13 @@ import {
   validateRevocationResponse,
   validateStepUpRequestResponse,
 } from "./validation.js";
+import {
+  canonicalPolicy,
+  computeContextHash,
+  computeDelegationBindingHash,
+  computeScopeHash,
+  type CanonicalPolicy,
+} from "./integrity.js";
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
 
@@ -590,6 +597,27 @@ function sameUnverifiedMetadata(
   return sameCanonicalStrings(responseProofs, requestProofs);
 }
 
+function decisionMatchesRequestedPolicy(
+  decision: AccessDecision,
+  policy: CanonicalPolicy,
+): boolean {
+  const rule = policy.rules.find((candidate) => candidate.action === decision.action);
+  if (decision.actionSensitivity !== (rule?.actionSensitivity ?? "ROUTINE")) return false;
+  if (decision.outcome === "ALLOW") {
+    return decision.reasonCode === "POLICY_ALLOW" &&
+      rule?.effect === "ALLOW" &&
+      decision.requiredApproverCapability === undefined;
+  }
+  if (decision.outcome === "STEP_UP") {
+    return decision.reasonCode === "HUMAN_APPROVAL_REQUIRED" &&
+      rule?.effect === "STEP_UP" &&
+      decision.requiredApproverCapability === rule.approverCapability;
+  }
+  if (decision.reasonCode === "POLICY_DENY") return rule?.effect === "DENY";
+  if (decision.reasonCode === "ACTION_NOT_PERMITTED") return rule === undefined;
+  return decision.requiredApproverCapability === undefined;
+}
+
 export class ZkycReferenceClient {
   readonly #baseUrl: URL;
   readonly #fetch: FetchLike;
@@ -607,7 +635,7 @@ export class ZkycReferenceClient {
 
   async #request<T>(
     path: string,
-    validate: (value: unknown) => T,
+    validate: (value: unknown) => T | Promise<T>,
     method = "GET",
     body?: unknown,
   ): Promise<T> {
@@ -662,7 +690,7 @@ export class ZkycReferenceClient {
       throw new ZkycApiError(response.status, error.code);
     }
     try {
-      return validate(parsed);
+      return await validate(parsed);
     } catch (error) {
       if (error instanceof InvalidProtocolResponse) {
         throw new ZkycTransportError("INVALID_RESPONSE");
@@ -676,8 +704,9 @@ export class ZkycReferenceClient {
   }
 
   issueCredential(input: IssueCredentialRequest) {
-    return this.#request("credentials", (value) => {
+    return this.#request("credentials", async (value) => {
       const response = validateCredentialResponse(value);
+      const expectedScopeHash = await computeScopeHash(input);
       requireResponseCorrelation(
         response.credential.principalId === input.principal.id &&
         response.credential.principalType === input.principal.type &&
@@ -685,6 +714,7 @@ export class ZkycReferenceClient {
         sameCanonicalStrings(response.credential.capabilities, input.capabilities) &&
         sameCanonicalStrings(response.credential.allowedActions, input.allowedActions) &&
         sameCanonicalStrings(response.credential.allowedResourceIds, input.allowedResourceIds) &&
+        response.credential.scopeHash === expectedScopeHash &&
         response.credential.expiresAt === input.expiresAt &&
         sameUnverifiedMetadata(response.credential.unverifiedMetadata, input.unverifiedMetadata),
       );
@@ -702,9 +732,12 @@ export class ZkycReferenceClient {
   }
 
   issueDelegation(input: IssueDelegationRequest) {
-    return this.#request("delegations", (value) => {
+    return this.#request("delegations", async (value) => {
       const response = validateDelegationResponse(value);
       const delegation = response.delegation;
+      const expectedPolicy = await canonicalPolicy(input.policy);
+      const expectedScopeHash = await computeScopeHash(input);
+      const expectedBindingHash = await computeDelegationBindingHash(delegation);
       requireResponseCorrelation(
         delegation.grantorCredentialId === input.grantorCredential.id &&
         delegation.grantorId === input.grantor.id &&
@@ -712,9 +745,12 @@ export class ZkycReferenceClient {
         delegation.delegateId === input.delegate.id &&
         delegation.delegateType === input.delegate.type &&
         delegation.policyId === input.policy.id &&
+        delegation.policyVersion === expectedPolicy.version &&
         sameCanonicalStrings(delegation.capabilities, input.capabilities) &&
         sameCanonicalStrings(delegation.allowedActions, input.allowedActions) &&
         sameCanonicalStrings(delegation.allowedResourceIds, input.allowedResourceIds) &&
+        delegation.scopeHash === expectedScopeHash &&
+        delegation.delegationBindingHash === expectedBindingHash &&
         delegation.expiresAt === input.expiresAt,
       );
       return response;
@@ -731,16 +767,21 @@ export class ZkycReferenceClient {
   }
 
   evaluate(input: EvaluateRequest): Promise<EvaluationResponse> {
-    return this.#request("evaluations", (value) => {
+    return this.#request("evaluations", async (value) => {
       const response = validateEvaluationResponse(value);
       const decision = response.decision;
+      const expectedPolicy = await canonicalPolicy(input.policy);
+      const expectedContextHash = await computeContextHash(input.actionContext);
       requireResponseCorrelation(
         decision.authorityMode === input.authorityMode &&
         decision.subjectId === input.principal.id &&
         decision.subjectType === input.principal.type &&
         decision.action === input.action &&
         decision.resourceId === input.resourceId &&
-        decision.policyId === input.policy.id,
+        decision.contextHash === expectedContextHash &&
+        decision.policyId === input.policy.id &&
+        decision.policyVersion === expectedPolicy.version &&
+        decisionMatchesRequestedPolicy(decision, expectedPolicy),
       );
       if (input.authorityMode === "DIRECT") {
         if (input.credential === null) {
@@ -756,6 +797,7 @@ export class ZkycReferenceClient {
         } else {
           requireResponseCorrelation(
             decision.authorityMode === "DIRECT" &&
+            decision.reasonCode !== "CREDENTIAL_MISSING" &&
             decision.actingCredentialId === input.credential.id &&
             decision.effectiveScopeHash === input.credential.scopeHash,
           );
@@ -763,6 +805,7 @@ export class ZkycReferenceClient {
       } else {
         requireResponseCorrelation(
           decision.authorityMode === "DELEGATED" &&
+          decision.reasonCode !== "CREDENTIAL_MISSING" &&
           decision.actingCredentialId === input.delegateIdentityCredential.id &&
           decision.effectiveScopeHash === input.delegation.scopeHash &&
           decision.grantorId === input.delegation.grantorId &&
@@ -779,7 +822,11 @@ export class ZkycReferenceClient {
   createStepUpRequest(input: { readonly decisionLogId: string; readonly expiresAt: string }) {
     return this.#request("step-up/requests", (value) => {
       const response = validateStepUpRequestResponse(value);
-      requireResponseCorrelation(response.decisionLogId === input.decisionLogId);
+      requireResponseCorrelation(
+        response.decisionLogId === input.decisionLogId &&
+        response.request.expiresAt === input.expiresAt &&
+        response.request.status === "PENDING",
+      );
       return response;
     }, "POST", input);
   }

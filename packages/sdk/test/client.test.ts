@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createReferenceApp } from "@ordin/zkyc-core-api-reference";
 import {
+  computeScopeHash,
+  createPolicy,
+  sha256Version,
+} from "@ordin/zkyc-core-reference";
+import {
   ZkycApiError,
   ZkycReferenceClient,
   ZkycTransportError,
@@ -376,6 +381,24 @@ test("SDK validates and consumes the complete direct step-up authorization bindi
   assert.equal((await client.getOnboardingView(evaluated.logId)).requiredApproval.status, "APPROVED");
 });
 
+const staticPolicyInput: PolicyInput = {
+  id: "policy:static",
+  rules: [{
+    action: "records:read",
+    actionSensitivity: "ROUTINE",
+    requiredCapabilities: ["records:read"],
+    requiredAffiliations: [],
+    effect: "ALLOW",
+  }],
+};
+const staticPolicy = createPolicy(staticPolicyInput);
+const staticScopeHash = computeScopeHash({
+  capabilities: ["records:read"],
+  allowedActions: ["records:read"],
+  allowedResourceIds: [RESOURCE],
+});
+const emptyContextHash = sha256Version({});
+
 const staticCredential: Credential = {
   version: 2,
   id: "credential:static",
@@ -388,7 +411,7 @@ const staticCredential: Credential = {
   allowedResourceIds: [RESOURCE],
   issuedAt: START,
   expiresAt: EXPIRY,
-  scopeHash: HASH_0,
+  scopeHash: staticScopeHash,
 };
 
 const staticDecision: AccessDecision = {
@@ -403,9 +426,9 @@ const staticDecision: AccessDecision = {
   action: "records:read",
   actionSensitivity: "ROUTINE",
   resourceId: RESOURCE,
-  contextHash: HASH_0,
-  policyId: "policy:static",
-  policyVersion: HASH_1,
+  contextHash: emptyContextHash,
+  policyId: staticPolicy.id,
+  policyVersion: staticPolicy.version,
   credentialId: staticCredential.id,
   decidedAt: START,
 };
@@ -531,6 +554,60 @@ test("SDK rejects valid responses bound to a different requested authority recor
     expiresAt: staticCredential.expiresAt,
   }));
 
+  const credentialInput = {
+    principal: human,
+    capabilities: staticCredential.capabilities,
+    allowedActions: staticCredential.allowedActions,
+    allowedResourceIds: staticCredential.allowedResourceIds,
+    expiresAt: staticCredential.expiresAt,
+  } as const;
+  const validCredentialClient = new ZkycReferenceClient({
+    baseUrl: "https://valid.reference",
+    fetch: () => Promise.resolve(jsonResponse({ credential: staticCredential }, 201)),
+  });
+  assert.equal((await validCredentialClient.issueCredential(credentialInput)).credential.scopeHash, staticScopeHash);
+
+  const forgedScopeClient = new ZkycReferenceClient({
+    baseUrl: "https://invalid.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      credential: { ...staticCredential, scopeHash: HASH_0 },
+    }, 201)),
+  });
+  await expectInvalidResponse(() => forgedScopeClient.issueCredential(credentialInput));
+
+  const evaluationInput = {
+    authorityMode: "DIRECT",
+    principal: human,
+    credential: staticCredential,
+    action: staticDecision.action,
+    resourceId: staticDecision.resourceId,
+    actionContext: {},
+    policy: staticPolicyInput,
+    issueReceipt: false,
+  } as const;
+  const validEvaluationClient = new ZkycReferenceClient({
+    baseUrl: "https://valid.reference",
+    fetch: () => Promise.resolve(jsonResponse({ logId: "decision-log:valid", decision: staticDecision })),
+  });
+  assert.equal((await validEvaluationClient.evaluate(evaluationInput)).decision.outcome, "ALLOW");
+
+  const denyPolicyInput = policy("DENY", staticDecision.action);
+  const denyPolicy = createPolicy(denyPolicyInput);
+  for (const invalidDecision of [
+    { ...staticDecision, contextHash: HASH_0 },
+    { ...staticDecision, policyVersion: HASH_1 },
+    { ...staticDecision, policyId: denyPolicy.id, policyVersion: denyPolicy.version },
+  ]) {
+    const client = new ZkycReferenceClient({
+      baseUrl: "https://invalid.reference",
+      fetch: () => Promise.resolve(jsonResponse({ logId: "decision-log:forged", decision: invalidDecision })),
+    });
+    await expectInvalidResponse(() => client.evaluate({
+      ...evaluationInput,
+      ...(invalidDecision.policyId === denyPolicy.id ? { policy: denyPolicyInput } : {}),
+    }));
+  }
+
   const delegate: Principal = { id: staticDelegation.delegateId, type: "AGENT", affiliations: [] };
   const delegationClient = new ZkycReferenceClient({
     baseUrl: "https://invalid.reference",
@@ -634,7 +711,7 @@ test("SDK accepts only exact credentialless direct denial and step-up response e
     action: staticDecision.action,
     resourceId: staticDecision.resourceId,
     actionContext: {},
-    policy: { id: staticDecision.policyId, rules: [] },
+    policy: staticPolicyInput,
     issueReceipt: false,
   } as const;
 
@@ -690,6 +767,14 @@ test("SDK accepts only exact credentialless direct denial and step-up response e
     { request: staticStepUpRequest },
     { decisionLogId: "decision-log:static" },
     { decisionLogId: "decision-log:static", request: staticStepUpRequest, unexpected: true },
+    {
+      decisionLogId: "decision-log:static",
+      request: { ...staticStepUpRequest, expiresAt: EXPIRY },
+    },
+    {
+      decisionLogId: "decision-log:static",
+      request: { ...staticStepUpRequest, status: "APPROVED" },
+    },
   ]) {
     const client = new ZkycReferenceClient({
       baseUrl: "https://invalid.reference",

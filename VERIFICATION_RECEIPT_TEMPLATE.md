@@ -35,14 +35,14 @@ If the environment requires it, record `npx playwright install chromium` separat
 
 | Lane | Exact count | Result |
 |---|---:|---|
-| Core |  |  |
-| API/server |  |  |
-| SDK |  |  |
-| Operator UI |  |  |
-| zkYA component |  |  |
-| Scanner regression |  |  |
-| Release-tooling regression |  |  |
-| Chromium E2E |  |  |
+| Core | 46 |  |
+| API/server | 13 |  |
+| SDK | 12 |  |
+| Operator UI | 3 |  |
+| zkYA component | 9 |  |
+| Scanner regression | 9 |  |
+| Release-tooling regression | 7 |  |
+| Chromium E2E | 1 |  |
 
 Do not count format, security, typecheck, build, package, or audit gates as tests.
 
