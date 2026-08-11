@@ -12,8 +12,13 @@ import type {
   Principal,
   PrincipalType,
   ReasonCode,
+  ReceiptConsumptionStatus,
   ReceiptExpectedBinding,
+  ReceiptLastAttempt,
   ReceiptPayload,
+  ReceiptProjection,
+  ReceiptVerification,
+  ReceiptVerificationCode,
   RequiredApprovalStatus,
   SignedReceipt,
   StepUpAuthorization,
@@ -268,12 +273,6 @@ function requiredApprovalStatus(value: unknown): RequiredApprovalStatus {
   return value;
 }
 
-function receiptState(value: unknown): "NOT_ISSUED" | "UNCONSUMED" | "CONSUMED" | "REJECTED" {
-  if (value !== "NOT_ISSUED" && value !== "UNCONSUMED" && value !== "CONSUMED" && value !== "REJECTED") {
-    invalid();
-  }
-  return value;
-}
 
 function assertDecisionCapability(
   decision: "ALLOW" | "DENY" | "STEP_UP",
@@ -943,7 +942,7 @@ export function validateAuthorizationConsumeResponse(
   return { authorized: booleanField(item.authorized) };
 }
 
-const receiptVerificationCodes = new Set([
+const receiptVerificationCodes = new Set<ReceiptVerificationCode>([
   "RECEIPT_VALID",
   "RECEIPT_MALFORMED",
   "RECEIPT_SIGNATURE_INVALID",
@@ -956,12 +955,59 @@ const receiptVerificationCodes = new Set([
   "RECEIPT_REPLAYED",
 ]);
 
+function receiptVerificationCode(value: unknown): ReceiptVerificationCode {
+  if (typeof value !== "string" || !receiptVerificationCodes.has(value as ReceiptVerificationCode)) invalid();
+  return value as ReceiptVerificationCode;
+}
+
 export function validateReceiptConsumeResponse(
   value: unknown,
-): { readonly valid: boolean; readonly reasonCode: string } {
+): ReceiptVerification {
   const item = record(value, ["valid", "reasonCode"]);
-  if (!receiptVerificationCodes.has(String(item.reasonCode))) invalid();
-  return { valid: booleanField(item.valid), reasonCode: String(item.reasonCode) };
+  const valid = booleanField(item.valid);
+  const reasonCode = receiptVerificationCode(item.reasonCode);
+  if (valid) {
+    if (reasonCode !== "RECEIPT_VALID") invalid();
+    return { valid: true, reasonCode };
+  }
+  if (reasonCode === "RECEIPT_VALID") invalid();
+  return { valid: false, reasonCode };
+}
+
+function receiptConsumptionStatus(value: unknown): ReceiptConsumptionStatus {
+  if (value !== "NOT_ISSUED" && value !== "UNCONSUMED" && value !== "CONSUMED") invalid();
+  return value;
+}
+
+function receiptLastAttempt(value: unknown): ReceiptLastAttempt {
+  const item = record(value, ["outcome", "reasonCode"], ["outcome"]);
+  if (item.outcome === "NONE") {
+    if (Object.hasOwn(item, "reasonCode")) invalid();
+    return { outcome: "NONE" };
+  }
+  if (!Object.hasOwn(item, "reasonCode")) invalid();
+  const reasonCode = receiptVerificationCode(item.reasonCode);
+  if (item.outcome === "ACCEPTED") {
+    if (reasonCode !== "RECEIPT_VALID") invalid();
+    return { outcome: "ACCEPTED", reasonCode };
+  }
+  if (item.outcome === "REJECTED") {
+    if (reasonCode === "RECEIPT_VALID" || reasonCode === "RECEIPT_MALFORMED") invalid();
+    return { outcome: "REJECTED", reasonCode };
+  }
+  return invalid();
+}
+
+function receiptProjection(value: unknown): ReceiptProjection {
+  const item = record(value, ["consumptionStatus", "lastAttempt"]);
+  const consumptionStatus = receiptConsumptionStatus(item.consumptionStatus);
+  const lastAttempt = receiptLastAttempt(item.lastAttempt);
+  if (
+    (consumptionStatus === "NOT_ISSUED" && lastAttempt.outcome !== "NONE") ||
+    (consumptionStatus === "UNCONSUMED" && lastAttempt.outcome === "ACCEPTED") ||
+    (consumptionStatus === "CONSUMED" && lastAttempt.outcome === "NONE")
+  ) invalid();
+  return { consumptionStatus, lastAttempt };
 }
 
 function validateLogEntry(value: unknown): DecisionLogEntry {
@@ -1069,8 +1115,7 @@ export function validateOnboardingView(value: unknown): OnboardingView {
     status: approvalStatus,
     ...(approval.requestId === undefined ? {} : { requestId: identifier(approval.requestId) }),
   };
-  const receipt = record(item.receipt, ["status"]);
-  const retainedReceiptStatus = receiptState(receipt.status);
+  const receipt = receiptProjection(item.receipt);
   return {
     version: 1,
     referenceOnly: true,
@@ -1081,7 +1126,7 @@ export function validateOnboardingView(value: unknown): OnboardingView {
     delegatedScope: item.delegatedScope === null ? null : delegatedScope(item.delegatedScope),
     eligibleActions,
     requiredApproval,
-    receipt: { status: retainedReceiptStatus },
+    receipt,
     policyId: identifier(item.policyId),
     policyVersion: hash(item.policyVersion),
   };

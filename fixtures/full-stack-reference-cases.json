@@ -123,7 +123,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "POLICY_ALLOW",
-            "receiptState": "UNCONSUMED",
+            "receipt": {
+              "consumptionStatus": "UNCONSUMED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "ACTIVE",
             "approvalStatus": "NOT_REQUIRED"
           }
@@ -273,7 +278,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "POLICY_DENY",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "ACTIVE",
             "approvalStatus": "NOT_REQUIRED"
           }
@@ -417,7 +427,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "HUMAN_APPROVAL_REQUIRED",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "ACTIVE",
             "approvalStatus": "PENDING"
           }
@@ -470,7 +485,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "STEP_UP_APPROVED",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "ACTIVE",
             "approvalStatus": "APPROVED"
           }
@@ -673,7 +693,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "STEP_UP_REJECTED",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "ACTIVE",
             "approvalStatus": "REJECTED"
           }
@@ -797,7 +822,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "CREDENTIAL_EXPIRED",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "EXPIRED",
             "approvalStatus": "NOT_REQUIRED"
           }
@@ -933,7 +963,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "CREDENTIAL_REVOKED",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "REVOKED",
             "approvalStatus": "NOT_REQUIRED"
           }
@@ -1328,7 +1363,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "POLICY_ALLOW",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "ACTIVE",
             "approvalStatus": "NOT_REQUIRED"
           }
@@ -1525,7 +1565,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "DELEGATION_EXPIRED",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "EXPIRED",
             "approvalStatus": "NOT_REQUIRED"
           }
@@ -1734,7 +1779,12 @@
           "expect": {
             "status": 200,
             "reasonCode": "DELEGATION_REVOKED",
-            "receiptState": "NOT_ISSUED",
+            "receipt": {
+              "consumptionStatus": "NOT_ISSUED",
+              "lastAttempt": {
+                "outcome": "NONE"
+              }
+            },
             "verificationStatus": "REVOKED",
             "approvalStatus": "NOT_REQUIRED"
           }

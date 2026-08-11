@@ -16,13 +16,17 @@ test("real SDK and HTTP stack executes zkYA authority lifecycle lanes", async ({
 
   let view = await runSelectedScenario(page);
   await expect(view.getByText("agent:reference-direct-reader", { exact: true })).toBeVisible();
-  await expect(view.getByText("UNCONSUMED", { exact: true })).toBeVisible();
+  const receiptProjection = view.locator(".receipt-projection");
+  await expect(receiptProjection.getByText("UNCONSUMED", { exact: true })).toBeVisible();
   await expect(view.getByText("HMAC-SHA256", { exact: true })).toBeVisible();
   await view.getByRole("button", { name: "Verify & consume full v2 binding" }).click();
-  await expect(view.getByText("RECEIPT_VALID", { exact: true })).toBeVisible();
-  await expect(view.getByText("CONSUMED", { exact: true })).toBeVisible();
+  await expect(receiptProjection.getByText("ACCEPTED", { exact: true })).toBeVisible();
+  await expect(receiptProjection.getByText("RECEIPT_VALID", { exact: true })).toBeVisible();
+  await expect(receiptProjection.getByText("CONSUMED", { exact: true })).toBeVisible();
   await view.getByRole("button", { name: "Verify & consume full v2 binding" }).click();
-  await expect(view.getByText("RECEIPT_REPLAYED", { exact: true })).toBeVisible();
+  await expect(receiptProjection.getByText("CONSUMED", { exact: true })).toBeVisible();
+  await expect(receiptProjection.getByText("REJECTED", { exact: true })).toBeVisible();
+  await expect(receiptProjection.getByText("RECEIPT_REPLAYED", { exact: true })).toBeVisible();
   await expect(view.getByText("Attempt 2", { exact: true })).toBeVisible();
 
   await page.getByRole("radio", { name: /Delegated organization scope/ }).check();

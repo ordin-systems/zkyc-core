@@ -116,7 +116,10 @@ test("compiled reference listener binds loopback and serves health plus retained
         reasonCode: "POLICY_ALLOW",
       }],
       requiredApproval: { status: "NOT_REQUIRED" },
-      receipt: { status: "NOT_ISSUED" },
+      receipt: {
+        consumptionStatus: "NOT_ISSUED",
+        lastAttempt: { outcome: "NONE" },
+      },
       policyId: "policy:server-smoke",
       policyVersion: (evaluated.body as { decision: { policyVersion: string } }).decision
         .policyVersion,

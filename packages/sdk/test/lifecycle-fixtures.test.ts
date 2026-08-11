@@ -273,7 +273,7 @@ function validateExpectation(op: Operation, value: unknown, label: string): void
   else if (op === "consumeReceipt") required = ["status", "reasonCode", "valid"];
   else {
     required = initial.status === 200
-      ? ["status", "reasonCode", "receiptState", "verificationStatus", "approvalStatus"]
+      ? ["status", "reasonCode", "receipt", "verificationStatus", "approvalStatus"]
       : ["status", "reasonCode"];
   }
   const expectation = exact(value, required, [], label);
@@ -283,12 +283,58 @@ function validateExpectation(op: Operation, value: unknown, label: string): void
   for (const key of [
     "outcome",
     "reasonCode",
-    "receiptState",
     "verificationStatus",
     "approvalStatus",
     "decisionLogId",
   ]) {
     if (expectation[key] !== undefined) text(expectation[key], `${label}.${key}`);
+  }
+  if (op === "consumeReceipt") {
+    assert.equal(
+      expectation.valid,
+      expectation.reasonCode === "RECEIPT_VALID",
+      `${label} receipt validity and reasonCode contradict`,
+    );
+  }
+  if (expectation.receipt !== undefined) {
+    const receipt = exact(expectation.receipt, ["consumptionStatus", "lastAttempt"], [], `${label}.receipt`);
+    const consumptionStatus = text(receipt.consumptionStatus, `${label}.receipt.consumptionStatus`);
+    assert.ok(
+      ["NOT_ISSUED", "UNCONSUMED", "CONSUMED"].includes(consumptionStatus),
+      `${label}.receipt.consumptionStatus is invalid`,
+    );
+    const attempt = record(receipt.lastAttempt, `${label}.receipt.lastAttempt`);
+    const outcome = text(attempt.outcome, `${label}.receipt.lastAttempt.outcome`);
+    if (outcome === "NONE") {
+      exact(attempt, ["outcome"], [], `${label}.receipt.lastAttempt`);
+    } else {
+      assert.ok(outcome === "ACCEPTED" || outcome === "REJECTED", `${label}.receipt.lastAttempt.outcome is invalid`);
+      exact(attempt, ["outcome", "reasonCode"], [], `${label}.receipt.lastAttempt`);
+      const reasonCode = text(attempt.reasonCode, `${label}.receipt.lastAttempt.reasonCode`);
+      if (outcome === "ACCEPTED") {
+        assert.equal(reasonCode, "RECEIPT_VALID", `${label}.receipt accepted reason is invalid`);
+      } else {
+        assert.ok(
+          [
+            "RECEIPT_SIGNATURE_INVALID",
+            "RECEIPT_NOT_YET_VALID",
+            "RECEIPT_EXPIRED",
+            "RECEIPT_BINDING_MISMATCH",
+            "RECEIPT_NOT_AUTHORIZING",
+            "RECEIPT_CREDENTIAL_INVALID",
+            "RECEIPT_AUTHORITY_INVALID",
+            "RECEIPT_REPLAYED",
+          ].includes(reasonCode),
+          `${label}.receipt rejected reason is invalid`,
+        );
+      }
+    }
+    assert.ok(
+      (consumptionStatus === "NOT_ISSUED" && outcome === "NONE") ||
+        (consumptionStatus === "UNCONSUMED" && outcome !== "ACCEPTED") ||
+        (consumptionStatus === "CONSUMED" && outcome !== "NONE"),
+      `${label}.receipt status and last attempt contradict`,
+    );
   }
 }
 
@@ -408,7 +454,7 @@ function assertExpected(step: TranscriptStep, actual: { readonly status: number;
     reasonCode: (body.decision as JsonRecord | undefined)?.reasonCode ?? body.reasonCode ??
       (body.error as JsonRecord | undefined)?.code ??
       ((body.eligibleActions as JsonRecord[] | undefined)?.[0]?.reasonCode),
-    receiptState: (body.receipt as JsonRecord | undefined)?.status,
+    receipt: body.receipt,
     verificationStatus: body.verificationStatus,
     approvalStatus: (body.request as JsonRecord | undefined)?.status ??
       (body.requiredApproval as JsonRecord | undefined)?.status ??
@@ -419,7 +465,7 @@ function assertExpected(step: TranscriptStep, actual: { readonly status: number;
     revoked: body.revoked,
   };
   for (const [key, expected] of Object.entries(step.expect)) {
-    if (key !== "status") assert.equal(observed[key], expected, `${step.op} ${key}`);
+    if (key !== "status") assert.deepEqual(observed[key], expected, `${step.op} ${key}`);
   }
 }
 

@@ -22,6 +22,8 @@ import {
   type Principal,
   type ReceiptExpectedBinding,
   type ReceiptPayload,
+  type ReceiptVerification,
+  type ReceiptVerificationCode,
   type SignedReceipt,
   type StepUpAuthorization,
   type StepUpAuthorizationBinding,
@@ -59,7 +61,25 @@ export interface DecisionLogEntry {
 type VerificationStatus = "ACTIVE" | "REVOKED" | "EXPIRED" | "INVALID";
 type EligibleActionStatus = "ELIGIBLE" | "APPROVAL_REQUIRED" | "INELIGIBLE";
 type RequiredApprovalStatus = "NOT_REQUIRED" | "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
-type RetainedReceiptStatus = "UNCONSUMED" | "CONSUMED" | "REJECTED";
+type ReceiptConsumptionStatus = "NOT_ISSUED" | "UNCONSUMED" | "CONSUMED";
+type RetainedReceiptConsumptionStatus = Exclude<ReceiptConsumptionStatus, "NOT_ISSUED">;
+type ReceiptLastAttempt =
+  | { readonly outcome: "NONE" }
+  | { readonly outcome: "ACCEPTED"; readonly reasonCode: "RECEIPT_VALID" }
+  | {
+    readonly outcome: "REJECTED";
+    readonly reasonCode: Exclude<ReceiptVerificationCode, "RECEIPT_VALID" | "RECEIPT_MALFORMED">;
+  };
+
+interface RetainedReceiptState {
+  readonly consumptionStatus: RetainedReceiptConsumptionStatus;
+  readonly lastAttempt: ReceiptLastAttempt;
+}
+
+interface ReceiptProjection {
+  readonly consumptionStatus: ReceiptConsumptionStatus;
+  readonly lastAttempt: ReceiptLastAttempt;
+}
 
 interface RetainedDecisionLogEntry extends DecisionLogEntry {
   readonly policy: Policy;
@@ -457,6 +477,51 @@ function signatureHashFromReceipt(value: unknown): string | undefined {
   }
 }
 
+function retainedReceiptState(
+  consumptionStatus: RetainedReceiptConsumptionStatus,
+  lastAttempt: ReceiptLastAttempt,
+): RetainedReceiptState {
+  return Object.freeze({
+    consumptionStatus,
+    lastAttempt: Object.freeze({ ...lastAttempt }),
+  });
+}
+
+function transitionReceiptState(
+  prior: RetainedReceiptState,
+  result: ReceiptVerification,
+): RetainedReceiptState {
+  if (result.valid !== (result.reasonCode === "RECEIPT_VALID")) {
+    throw new DomainValidationError("receipt verification result is contradictory");
+  }
+  if (result.valid) {
+    return retainedReceiptState("CONSUMED", {
+      outcome: "ACCEPTED",
+      reasonCode: "RECEIPT_VALID",
+    });
+  }
+  if (result.reasonCode === "RECEIPT_VALID" || result.reasonCode === "RECEIPT_MALFORMED") {
+    throw new DomainValidationError("receipt verification result cannot update retained state");
+  }
+  return retainedReceiptState(prior.consumptionStatus, {
+    outcome: "REJECTED",
+    reasonCode: result.reasonCode,
+  });
+}
+
+function receiptProjection(state: RetainedReceiptState | undefined): ReceiptProjection {
+  if (state === undefined) {
+    return {
+      consumptionStatus: "NOT_ISSUED",
+      lastAttempt: { outcome: "NONE" },
+    };
+  }
+  return {
+    consumptionStatus: state.consumptionStatus,
+    lastAttempt: { ...state.lastAttempt },
+  };
+}
+
 export function createReferenceApp(options: ReferenceAppOptions): Hono {
   if (typeof options?.clock !== "function" || typeof options?.idFactory !== "function") {
     throw new DomainValidationError("clock and idFactory are required");
@@ -484,7 +549,7 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
   const decisionLog = new Map<string, RetainedDecisionLogEntry>();
   const requestByDecisionLogId = new Map<string, string>();
   const authorizationByRequestId = new Map<string, StepUpAuthorization>();
-  const receiptStatusBySignatureHash = new Map<string, RetainedReceiptStatus>();
+  const receiptStateBySignatureHash = new Map<string, RetainedReceiptState>();
   const app = new Hono();
 
   app.use("*", async (context, next) => {
@@ -712,7 +777,10 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
         signatureHash: sha256Version(receipt.signature),
       });
     if (retainedReceipt !== undefined) {
-      receiptStatusBySignatureHash.set(retainedReceipt.signatureHash, "UNCONSUMED");
+      receiptStateBySignatureHash.set(
+        retainedReceipt.signatureHash,
+        retainedReceiptState("UNCONSUMED", { outcome: "NONE" }),
+      );
     }
     decisionLog.set(logId, Object.freeze({
       id: logId,
@@ -814,10 +882,11 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
       },
     );
     const signatureHash = signatureHashFromReceipt(body.receipt);
-    if (signatureHash !== undefined && receiptStatusBySignatureHash.has(signatureHash)) {
-      const prior = receiptStatusBySignatureHash.get(signatureHash);
-      if (result.valid) receiptStatusBySignatureHash.set(signatureHash, "CONSUMED");
-      else if (prior !== "CONSUMED") receiptStatusBySignatureHash.set(signatureHash, "REJECTED");
+    if (signatureHash !== undefined && result.reasonCode !== "RECEIPT_MALFORMED") {
+      const prior = receiptStateBySignatureHash.get(signatureHash);
+      if (prior !== undefined) {
+        receiptStateBySignatureHash.set(signatureHash, transitionReceiptState(prior, result));
+      }
     }
     return context.json(result);
   });
@@ -845,9 +914,10 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
     const authorizationUsability = authorization === undefined
       ? undefined
       : stepUpService.inspectAuthorization({ authorization, at: now });
-    const receiptStatus = retained.receipt === undefined
-      ? "NOT_ISSUED"
-      : receiptStatusBySignatureHash.get(retained.receipt.signatureHash) ?? "UNCONSUMED";
+    const receiptState = retained.receipt === undefined
+      ? undefined
+      : receiptStateBySignatureHash.get(retained.receipt.signatureHash) ??
+        retainedReceiptState("UNCONSUMED", { outcome: "NONE" });
     const delegatedScope = retained.decision.authorityMode === "DELEGATED" && retained.delegation !== undefined
       ? {
         delegationId: retained.delegation.id,
@@ -874,7 +944,7 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
         authorizationUsability,
       )],
       requiredApproval: approval,
-      receipt: { status: receiptStatus },
+      receipt: receiptProjection(receiptState),
       policyId: retained.decision.policyId,
       policyVersion: retained.decision.policyVersion,
     });

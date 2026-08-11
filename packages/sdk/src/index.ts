@@ -607,7 +607,34 @@ export type RequiredApprovalStatus =
   | "APPROVED"
   | "REJECTED"
   | "EXPIRED";
-export type ReceiptState = "NOT_ISSUED" | "UNCONSUMED" | "CONSUMED" | "REJECTED";
+export type ReceiptVerificationCode =
+  | "RECEIPT_VALID"
+  | "RECEIPT_MALFORMED"
+  | "RECEIPT_SIGNATURE_INVALID"
+  | "RECEIPT_NOT_YET_VALID"
+  | "RECEIPT_EXPIRED"
+  | "RECEIPT_BINDING_MISMATCH"
+  | "RECEIPT_NOT_AUTHORIZING"
+  | "RECEIPT_CREDENTIAL_INVALID"
+  | "RECEIPT_AUTHORITY_INVALID"
+  | "RECEIPT_REPLAYED";
+export type ReceiptFailureCode = Exclude<ReceiptVerificationCode, "RECEIPT_VALID">;
+export type ReceiptVerification =
+  | { readonly valid: true; readonly reasonCode: "RECEIPT_VALID" }
+  | { readonly valid: false; readonly reasonCode: ReceiptFailureCode };
+export type ReceiptRetainedRejectionCode = Exclude<ReceiptFailureCode, "RECEIPT_MALFORMED">;
+export type ReceiptConsumptionStatus = "NOT_ISSUED" | "UNCONSUMED" | "CONSUMED";
+export type ReceiptLastAttempt =
+  | { readonly outcome: "NONE" }
+  | { readonly outcome: "ACCEPTED"; readonly reasonCode: "RECEIPT_VALID" }
+  | {
+      readonly outcome: "REJECTED";
+      readonly reasonCode: ReceiptRetainedRejectionCode;
+    };
+export interface ReceiptProjection {
+  readonly consumptionStatus: ReceiptConsumptionStatus;
+  readonly lastAttempt: ReceiptLastAttempt;
+}
 
 export interface DelegatedScopeView {
   readonly delegationId: string;
@@ -637,9 +664,7 @@ export interface OnboardingView {
     readonly status: RequiredApprovalStatus;
     readonly requestId?: string;
   };
-  readonly receipt: {
-    readonly status: ReceiptState;
-  };
+  readonly receipt: ReceiptProjection;
   readonly policyId: string;
   readonly policyVersion: string;
 }
