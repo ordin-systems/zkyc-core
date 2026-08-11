@@ -1594,6 +1594,316 @@ test("SDK correlates fully bound delegated status and identity denials in core o
   });
 });
 
+function correlatedGrantorCredential(overrides: Partial<Credential> = {}): Credential {
+  const altered = { ...staticCredential, ...overrides };
+  return {
+    ...altered,
+    scopeHash: computeScopeHash({
+      capabilities: altered.capabilities,
+      allowedActions: altered.allowedActions,
+      allowedResourceIds: altered.allowedResourceIds,
+    }),
+  };
+}
+
+function fullyBoundDelegatedSuccess(
+  outcome: "ALLOW" | "STEP_UP",
+  delegation: CapabilityDelegation = delegatedCorrelationDelegation,
+) {
+  const stepUp = outcome === "STEP_UP";
+  return {
+    ...fullyBoundDelegatedDenial(stepUp ? "HUMAN_APPROVAL_REQUIRED" : "POLICY_ALLOW", delegation),
+    outcome,
+    reasonCode: stepUp ? "HUMAN_APPROVAL_REQUIRED" : "POLICY_ALLOW",
+    actionSensitivity: stepUp ? "SENSITIVE" : "ROUTINE",
+    policyId: delegation.policyId,
+    policyVersion: delegation.policyVersion,
+    ...(stepUp ? { requiredApproverCapability: "approval:records-export" } : {}),
+  } as const;
+}
+
+test("SDK correlates fully bound delegated grantor and attenuation denials in core order", async (t) => {
+  const laterReasons = [
+    "DELEGATION_GRANTOR_MISMATCH",
+    "ACTION_OUTSIDE_DELEGATION_SCOPE",
+    "RESOURCE_OUTSIDE_DELEGATION_SCOPE",
+    "POLICY_DENY",
+    "INSUFFICIENT_DELEGATED_CAPABILITY",
+    "AFFILIATION_REQUIRED",
+    "ACTION_NOT_PERMITTED",
+  ] as const;
+  const invalidGrantors: readonly { readonly name: string; readonly credential: Credential }[] = [
+    { name: "malformed", credential: {} as Credential },
+    { name: "scope-invalid", credential: { ...staticCredential, scopeHash: HASH_0 } },
+    { name: "not-yet-valid", credential: { ...staticCredential, issuedAt: LATER } },
+    {
+      name: "expired",
+      credential: {
+        ...staticCredential,
+        issuedAt: "2026-05-31T23:00:00.000Z",
+        expiresAt: START,
+      },
+    },
+    {
+      name: "issuer-contradictory",
+      credential: { ...staticCredential, issuerId: "issuer:other" },
+    },
+  ];
+
+  for (const invalidGrantor of invalidGrantors) {
+    await t.test(`rejects every later reason for ${invalidGrantor.name} grantor authority`, async () => {
+      for (const reasonCode of laterReasons) {
+        await expectInvalidResponse(() => delegatedDenialClient(
+          fullyBoundDelegatedDenial(reasonCode),
+        ).evaluate({
+          ...delegatedCorrelationInput,
+          grantorCredential: invalidGrantor.credential,
+        }));
+      }
+    });
+  }
+
+  const stepUpPolicyInput: PolicyInput = {
+    id: "policy:static-step-up",
+    rules: [{
+      action: "records:read",
+      actionSensitivity: "SENSITIVE",
+      requiredCapabilities: ["records:read"],
+      requiredAffiliations: [],
+      effect: "STEP_UP",
+      approverCapability: "approval:records-export",
+    }],
+  };
+  const stepUpPolicy = createPolicy(stepUpPolicyInput);
+  const stepUpDelegation = correlatedDelegation({
+    policyId: stepUpPolicy.id,
+    policyVersion: stepUpPolicy.version,
+  });
+  const successCases = [
+    {
+      name: "ALLOW",
+      decision: fullyBoundDelegatedSuccess("ALLOW"),
+      input: delegatedCorrelationInput,
+    },
+    {
+      name: "STEP_UP",
+      decision: fullyBoundDelegatedSuccess("STEP_UP", stepUpDelegation),
+      input: {
+        ...delegatedCorrelationInput,
+        delegation: stepUpDelegation,
+        policy: stepUpPolicyInput,
+      },
+    },
+  ] as const;
+  for (const successCase of successCases) {
+    await t.test(`accepts valid delegated ${successCase.name} positive control`, async () => {
+      const evaluated = await delegatedDenialClient(successCase.decision).evaluate(successCase.input);
+      assert.equal(evaluated.decision.outcome, successCase.name);
+      assert.equal(evaluated.receipt, undefined);
+    });
+    for (const invalidGrantor of [
+      { name: "scope-invalid", credential: { ...staticCredential, scopeHash: HASH_0 } },
+      {
+        name: "issuer-contradictory",
+        credential: correlatedGrantorCredential({ issuerId: "issuer:other" }),
+      },
+    ] as const) {
+      await t.test(`rejects forged ${successCase.name} for ${invalidGrantor.name} grantor`, async () => {
+        await expectInvalidResponse(() => delegatedDenialClient(successCase.decision).evaluate({
+          ...successCase.input,
+          grantorCredential: invalidGrantor.credential,
+        }));
+      });
+    }
+  }
+
+  await t.test("contains grantor accessors that become malformed during validation", async () => {
+    let actionReads = 0;
+    const throwingGrantor = {
+      ...staticCredential,
+      get allowedActions(): readonly string[] {
+        actionReads += 1;
+        if (actionReads === 1) return staticCredential.allowedActions;
+        throw new Error("RAW_GRANTOR_GETTER_LEAK");
+      },
+    } as Credential;
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedSuccess("ALLOW"),
+    ).evaluate({
+      ...delegatedCorrelationInput,
+      grantorCredential: throwingGrantor,
+    }));
+    assert.equal(actionReads, 2);
+  });
+
+  await t.test("preserves checkDelegation grantor-invalid before the outer delegate-tuple stage", async () => {
+    const mismatchedDelegation = correlatedDelegation({ delegateId: "agent:other" });
+    const evaluated = await delegatedDenialClient(fullyBoundDelegatedDenial(
+      "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+      mismatchedDelegation,
+    )).evaluate({
+      ...delegatedCorrelationInput,
+      grantorCredential: {} as Credential,
+      delegation: mismatchedDelegation,
+    });
+    assert.equal(evaluated.decision.reasonCode, "DELEGATION_GRANTOR_CREDENTIAL_INVALID");
+    assert.equal(evaluated.receipt, undefined);
+  });
+
+  const tupleContradictions = [
+    {
+      name: "credential ID",
+      credential: correlatedGrantorCredential({ id: "credential:other-grantor" }),
+    },
+    {
+      name: "principal ID",
+      credential: correlatedGrantorCredential({ principalId: "principal:other-grantor" }),
+    },
+    {
+      name: "principal type",
+      credential: correlatedGrantorCredential({ principalType: "ORGANIZATION" }),
+    },
+  ] as const;
+  for (const contradiction of tupleContradictions) {
+    await t.test(`accepts exact grantor mismatch for ${contradiction.name}`, async () => {
+      const evaluated = await delegatedDenialClient(
+        fullyBoundDelegatedDenial("DELEGATION_GRANTOR_MISMATCH"),
+      ).evaluate({
+        ...delegatedCorrelationInput,
+        grantorCredential: contradiction.credential,
+      });
+      assert.equal(evaluated.decision.reasonCode, "DELEGATION_GRANTOR_MISMATCH");
+      assert.equal(evaluated.receipt, undefined);
+    });
+
+    await t.test(`blocks later stages for mismatched ${contradiction.name}`, async () => {
+      for (const reasonCode of [
+        "ACTION_OUTSIDE_DELEGATION_SCOPE",
+        "RESOURCE_OUTSIDE_DELEGATION_SCOPE",
+        "INSUFFICIENT_DELEGATED_CAPABILITY",
+      ] as const) {
+        await expectInvalidResponse(() => delegatedDenialClient(
+          fullyBoundDelegatedDenial(reasonCode),
+        ).evaluate({
+          ...delegatedCorrelationInput,
+          grantorCredential: contradiction.credential,
+        }));
+      }
+    });
+  }
+
+  await t.test("rejects false grantor mismatch when the validated tuple matches", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_GRANTOR_MISMATCH"),
+    ).evaluate(delegatedCorrelationInput));
+  });
+
+  const grantorWithoutAction = correlatedGrantorCredential({ allowedActions: [] });
+  const delegationWithoutAction = correlatedDelegation({ allowedActions: ["records:other"] });
+  const actionContradictions = [
+    {
+      name: "grantor credential",
+      input: { ...delegatedCorrelationInput, grantorCredential: grantorWithoutAction },
+      delegation: delegatedCorrelationDelegation,
+    },
+    {
+      name: "delegation",
+      input: { ...delegatedCorrelationInput, delegation: delegationWithoutAction },
+      delegation: delegationWithoutAction,
+    },
+  ] as const;
+  for (const contradiction of actionContradictions) {
+    await t.test(`accepts action attenuation denial when absent from ${contradiction.name}`, async () => {
+      const evaluated = await delegatedDenialClient(fullyBoundDelegatedDenial(
+        "ACTION_OUTSIDE_DELEGATION_SCOPE",
+        contradiction.delegation,
+      )).evaluate(contradiction.input);
+      assert.equal(evaluated.decision.reasonCode, "ACTION_OUTSIDE_DELEGATION_SCOPE");
+      assert.equal(evaluated.receipt, undefined);
+    });
+
+    await t.test(`blocks resource and downstream stages when action is absent from ${contradiction.name}`, async () => {
+      for (const reasonCode of [
+        "RESOURCE_OUTSIDE_DELEGATION_SCOPE",
+        "INSUFFICIENT_DELEGATED_CAPABILITY",
+      ] as const) {
+        await expectInvalidResponse(() => delegatedDenialClient(fullyBoundDelegatedDenial(
+          reasonCode,
+          contradiction.delegation,
+        )).evaluate(contradiction.input));
+      }
+    });
+  }
+
+  await t.test("rejects false action attenuation denial when action is in both scopes", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("ACTION_OUTSIDE_DELEGATION_SCOPE"),
+    ).evaluate(delegatedCorrelationInput));
+  });
+
+  const grantorWithoutResource = correlatedGrantorCredential({ allowedResourceIds: [] });
+  const delegationWithoutResource = correlatedDelegation({
+    allowedResourceIds: ["record:other"],
+  });
+  const resourceContradictions = [
+    {
+      name: "grantor credential",
+      input: { ...delegatedCorrelationInput, grantorCredential: grantorWithoutResource },
+      delegation: delegatedCorrelationDelegation,
+    },
+    {
+      name: "delegation",
+      input: { ...delegatedCorrelationInput, delegation: delegationWithoutResource },
+      delegation: delegationWithoutResource,
+    },
+  ] as const;
+  for (const contradiction of resourceContradictions) {
+    await t.test(`accepts resource attenuation denial when absent from ${contradiction.name}`, async () => {
+      const evaluated = await delegatedDenialClient(fullyBoundDelegatedDenial(
+        "RESOURCE_OUTSIDE_DELEGATION_SCOPE",
+        contradiction.delegation,
+      )).evaluate(contradiction.input);
+      assert.equal(evaluated.decision.reasonCode, "RESOURCE_OUTSIDE_DELEGATION_SCOPE");
+      assert.equal(evaluated.receipt, undefined);
+    });
+
+    await t.test(`blocks downstream stages when resource is absent from ${contradiction.name}`, async () => {
+      await expectInvalidResponse(() => delegatedDenialClient(fullyBoundDelegatedDenial(
+        "INSUFFICIENT_DELEGATED_CAPABILITY",
+        contradiction.delegation,
+      )).evaluate(contradiction.input));
+    });
+  }
+
+  await t.test("rejects false resource attenuation denial when resource is in both scopes", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("RESOURCE_OUTSIDE_DELEGATION_SCOPE"),
+    ).evaluate(delegatedCorrelationInput));
+  });
+});
+
+test("SDK preserves a validated grantor credential snapshot for later fully bound denials", async () => {
+  const grantorWithoutResource = correlatedGrantorCredential({ allowedResourceIds: [] });
+  let actionReads = 0;
+  const accessorGrantorCredential = {
+    ...grantorWithoutResource,
+    get allowedActions(): readonly string[] {
+      actionReads += 1;
+      return actionReads <= 2 ? grantorWithoutResource.allowedActions : [];
+    },
+  } as Credential;
+  const evaluated = await delegatedDenialClient(
+    fullyBoundDelegatedDenial("RESOURCE_OUTSIDE_DELEGATION_SCOPE"),
+  ).evaluate({
+    ...delegatedCorrelationInput,
+    grantorCredential: accessorGrantorCredential,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "RESOURCE_OUTSIDE_DELEGATION_SCOPE");
+  assert.equal(evaluated.receipt, undefined);
+  assert.equal(actionReads, 2);
+});
+
 test("SDK preserves a validated delegation snapshot for fully bound denials", async () => {
   let idReads = 0;
   const accessorDelegation = {
