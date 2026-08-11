@@ -317,6 +317,33 @@ test("SDK accepts real Hono direct CREDENTIAL_UNKNOWN without trusted bindings",
   assert.equal("credentialId" in evaluated.decision, false);
 });
 
+test("SDK preserves real Hono server-authoritative direct CREDENTIAL_REVOKED binding", async () => {
+  const { client } = harness();
+  const credential = await issueCredential(client, human, ["records:read"]);
+  assert.deepEqual(await client.revokeCredential(credential.id, { reason: "direct-evaluation-test" }), {
+    revoked: true,
+  });
+
+  const evaluated = await client.evaluate({
+    authorityMode: "DIRECT",
+    principal: human,
+    credential,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-revoked-direct-denial" },
+    policy: policy("ALLOW", "records:read"),
+    issueReceipt: true,
+    receiptExpiresAt: ARTIFACT_EXPIRY,
+  });
+
+  assert.equal(evaluated.decision.outcome, "DENY");
+  assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_REVOKED");
+  assert.equal(evaluated.decision.actingCredentialId, credential.id);
+  assert.equal(evaluated.decision.effectiveScopeHash, credential.scopeHash);
+  assert.equal(evaluated.decision.credentialId, credential.id);
+  assert.equal(evaluated.receipt, undefined);
+});
+
 async function issueDelegatedFixture(client: ZkycReferenceClient) {
   const grantor: Principal = { id: "organization:fixture-grantor", type: "ORGANIZATION", affiliations: [] };
   const delegate: Principal = { id: "agent:fixture-delegate", type: "AGENT", affiliations: [] };
@@ -854,6 +881,258 @@ async function expectInvalidResponse(action: () => Promise<unknown>): Promise<vo
     (error: unknown) => error instanceof ZkycTransportError && error.code === "INVALID_RESPONSE",
   );
 }
+
+const staticDirectDenyDecision = {
+  version: 2,
+  outcome: "DENY",
+  authorityMode: "DIRECT",
+  subjectId: human.id,
+  subjectType: human.type,
+  action: staticDecision.action,
+  actionSensitivity: staticDecision.actionSensitivity,
+  resourceId: staticDecision.resourceId,
+  contextHash: staticDecision.contextHash,
+  policyId: staticDecision.policyId,
+  policyVersion: staticDecision.policyVersion,
+  decidedAt: staticDecision.decidedAt,
+} as const;
+
+const staticBoundDirectDenyDecision = {
+  ...staticDirectDenyDecision,
+  actingCredentialId: staticCredential.id,
+  effectiveScopeHash: staticCredential.scopeHash,
+  credentialId: staticCredential.id,
+} as const;
+
+const staticDirectEvaluationInput = {
+  authorityMode: "DIRECT",
+  principal: human,
+  credential: staticCredential,
+  action: staticDecision.action,
+  resourceId: staticDecision.resourceId,
+  actionContext: {},
+  policy: staticPolicyInput,
+  issueReceipt: false,
+} as const;
+
+test("SDK rejects direct denial reasons contradicted by request-observable authority", async (t) => {
+  const contradictions = [
+    { reasonCode: "CREDENTIAL_MALFORMED", binding: "UNBOUND" },
+    { reasonCode: "CREDENTIAL_NOT_YET_VALID", binding: "BOUND" },
+    { reasonCode: "CREDENTIAL_EXPIRED", binding: "BOUND" },
+    { reasonCode: "CREDENTIAL_SUBJECT_MISMATCH", binding: "BOUND" },
+    { reasonCode: "ACTION_OUTSIDE_CREDENTIAL_SCOPE", binding: "BOUND" },
+    { reasonCode: "RESOURCE_OUTSIDE_CREDENTIAL_SCOPE", binding: "BOUND" },
+    { reasonCode: "INSUFFICIENT_CAPABILITY", binding: "BOUND" },
+    { reasonCode: "AFFILIATION_REQUIRED", binding: "BOUND" },
+  ] as const;
+
+  for (const contradiction of contradictions) {
+    await t.test(contradiction.reasonCode, async () => {
+      const decision = {
+        ...(contradiction.binding === "BOUND"
+          ? staticBoundDirectDenyDecision
+          : staticDirectDenyDecision),
+        reasonCode: contradiction.reasonCode,
+      };
+      const client = new ZkycReferenceClient({
+        baseUrl: "https://invalid.reference",
+        fetch: () => Promise.resolve(jsonResponse({
+          logId: `decision-log:contradicted-${contradiction.reasonCode.toLowerCase()}`,
+          decision,
+        })),
+      });
+
+      await expectInvalidResponse(() => client.evaluate(staticDirectEvaluationInput));
+    });
+  }
+});
+
+test("SDK preserves server-authoritative direct unknown and revoked denials", async (t) => {
+  const controls = [
+    {
+      reasonCode: "CREDENTIAL_UNKNOWN",
+      decision: { ...staticDirectDenyDecision, reasonCode: "CREDENTIAL_UNKNOWN" },
+    },
+    {
+      reasonCode: "CREDENTIAL_REVOKED",
+      decision: { ...staticBoundDirectDenyDecision, reasonCode: "CREDENTIAL_REVOKED" },
+    },
+  ] as const;
+
+  for (const control of controls) {
+    await t.test(control.reasonCode, async () => {
+      const client = new ZkycReferenceClient({
+        baseUrl: "https://valid.reference",
+        fetch: () => Promise.resolve(jsonResponse({
+          logId: `decision-log:server-authoritative-${control.reasonCode.toLowerCase()}`,
+          decision: control.decision,
+        })),
+      });
+
+      const evaluated = await client.evaluate(staticDirectEvaluationInput);
+      assert.equal(evaluated.decision.outcome, "DENY");
+      assert.equal(evaluated.decision.reasonCode, control.reasonCode);
+      if (control.reasonCode === "CREDENTIAL_UNKNOWN") {
+        assert.equal("actingCredentialId" in evaluated.decision, false);
+        assert.equal("effectiveScopeHash" in evaluated.decision, false);
+        assert.equal("credentialId" in evaluated.decision, false);
+      } else {
+        assert.equal(evaluated.decision.actingCredentialId, staticCredential.id);
+        assert.equal(evaluated.decision.effectiveScopeHash, staticCredential.scopeHash);
+        assert.equal(evaluated.decision.credentialId, staticCredential.id);
+      }
+      assert.equal(evaluated.receipt, undefined);
+    });
+  }
+});
+
+test("SDK rejects accessor-backed credential mutation after validation without leaking raw errors", async () => {
+  let capabilityReads = 0;
+  const accessorCredential = {
+    ...staticCredential,
+    get capabilities(): readonly string[] {
+      capabilityReads += 1;
+      return capabilityReads <= 2 ? staticCredential.capabilities : null as unknown as readonly string[];
+    },
+  } as Credential;
+  const decision = {
+    ...staticBoundDirectDenyDecision,
+    reasonCode: "INSUFFICIENT_CAPABILITY",
+  } as const;
+  const client = new ZkycReferenceClient({
+    baseUrl: "https://mutable-caller-artifact.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      logId: "decision-log:mutable-caller-artifact",
+      decision,
+    })),
+  });
+
+  await expectInvalidResponse(() => client.evaluate({
+    ...staticDirectEvaluationInput,
+    credential: accessorCredential,
+  }));
+});
+
+test("SDK enforces direct credential precedence before policy-stage denials", async (t) => {
+  const denyPolicyInput = policy("DENY", staticDirectEvaluationInput.action);
+  const denyPolicy = createPolicy(denyPolicyInput);
+  const actionNotPermittedAction = "records:write";
+  const actionNotPermittedCredentialScope = {
+    capabilities: staticCredential.capabilities,
+    allowedActions: [staticDirectEvaluationInput.action, actionNotPermittedAction],
+    allowedResourceIds: staticCredential.allowedResourceIds,
+  } as const;
+  const actionNotPermittedCredential: Credential = {
+    ...staticCredential,
+    ...actionNotPermittedCredentialScope,
+    scopeHash: computeScopeHash(actionNotPermittedCredentialScope),
+  };
+  const policyStages = [
+    {
+      reasonCode: "POLICY_DENY",
+      policy: denyPolicyInput,
+      policyVersion: denyPolicy.version,
+      action: staticDirectEvaluationInput.action,
+      credential: staticCredential,
+    },
+    {
+      reasonCode: "ACTION_NOT_PERMITTED",
+      policy: staticPolicyInput,
+      policyVersion: staticPolicy.version,
+      action: actionNotPermittedAction,
+      credential: actionNotPermittedCredential,
+    },
+  ] as const;
+
+  for (const stage of policyStages) {
+    const input = {
+      ...staticDirectEvaluationInput,
+      action: stage.action,
+      policy: stage.policy,
+      credential: stage.credential,
+    };
+    const decision = {
+      ...staticBoundDirectDenyDecision,
+      reasonCode: stage.reasonCode,
+      action: stage.action,
+      policyId: stage.policy.id,
+      policyVersion: stage.policyVersion,
+      actingCredentialId: stage.credential.id,
+      effectiveScopeHash: stage.credential.scopeHash,
+      credentialId: stage.credential.id,
+    };
+    const clientFor = (responseDecision: unknown) => new ZkycReferenceClient({
+      baseUrl: "https://policy-stage.reference",
+      fetch: () => Promise.resolve(jsonResponse({
+        logId: `decision-log:${stage.reasonCode.toLowerCase()}`,
+        decision: responseDecision,
+      })),
+    });
+
+    await t.test(`${stage.reasonCode} accepted after all earlier stages pass`, async () => {
+      const evaluated = await clientFor(decision).evaluate(input);
+      assert.equal(evaluated.decision.reasonCode, stage.reasonCode);
+      assert.equal(evaluated.receipt, undefined);
+    });
+
+    const malformedCredential = {
+      ...stage.credential,
+      capabilities: null,
+    } as unknown as Credential;
+    const earlierStageContradictions: readonly {
+      readonly name: string;
+      readonly credential: Credential;
+    }[] = [
+      { name: "malformed", credential: malformedCredential },
+      { name: "not yet valid", credential: { ...stage.credential, issuedAt: LATER } },
+      { name: "expired", credential: { ...stage.credential, expiresAt: START } },
+      {
+        name: "subject mismatch",
+        credential: { ...stage.credential, principalId: "principal:other" },
+      },
+      {
+        name: "action outside scope",
+        credential: {
+          ...stage.credential,
+          allowedActions: [],
+          scopeHash: computeScopeHash({
+            capabilities: stage.credential.capabilities,
+            allowedActions: [],
+            allowedResourceIds: stage.credential.allowedResourceIds,
+          }),
+        },
+      },
+      {
+        name: "resource outside scope",
+        credential: {
+          ...stage.credential,
+          allowedResourceIds: [],
+          scopeHash: computeScopeHash({
+            capabilities: stage.credential.capabilities,
+            allowedActions: stage.credential.allowedActions,
+            allowedResourceIds: [],
+          }),
+        },
+      },
+    ];
+
+    for (const contradiction of earlierStageContradictions) {
+      await t.test(`${stage.reasonCode} rejects ${contradiction.name} credential`, async () => {
+        const forgedDecision = {
+          ...decision,
+          actingCredentialId: contradiction.credential.id,
+          effectiveScopeHash: contradiction.credential.scopeHash,
+          credentialId: contradiction.credential.id,
+        };
+        await expectInvalidResponse(() => clientFor(forgedDecision).evaluate({
+          ...input,
+          credential: contradiction.credential,
+        }));
+      });
+    }
+  }
+});
 
 test("SDK rejects issueDelegation responses correlated to forged request or credential facts", async (t) => {
   const grantor: Principal = {
