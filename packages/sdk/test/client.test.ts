@@ -18,6 +18,7 @@ import {
   type ConsumeStepUpAuthorizationRequest,
   type Credential,
   type FetchLike,
+  type IssueDelegationRequest,
   type OnboardingView,
   type PolicyInput,
   type Principal,
@@ -853,6 +854,180 @@ async function expectInvalidResponse(action: () => Promise<unknown>): Promise<vo
     (error: unknown) => error instanceof ZkycTransportError && error.code === "INVALID_RESPONSE",
   );
 }
+
+test("SDK rejects issueDelegation responses correlated to forged request or credential facts", async (t) => {
+  const grantor: Principal = {
+    id: "principal:delegation-grantor",
+    type: "HUMAN",
+    affiliations: [
+      { organizationId: "organization:zeta", role: "member" },
+      { organizationId: "organization:alpha", role: "admin" },
+    ],
+  };
+  const canonicalGrantorAffiliations = [...grantor.affiliations].reverse();
+  const delegate: Principal = {
+    id: "agent:delegation-delegate",
+    type: "AGENT",
+    affiliations: [],
+  };
+  const grantorCredentialScope = {
+    capabilities: ["delegation:issue", "records:read", "records:write"],
+    allowedActions: ["records:read", "records:write"],
+    allowedResourceIds: [RESOURCE, "record:other"],
+  } as const;
+  const grantorCredential: Credential = {
+    version: 2,
+    id: "credential:delegation-grantor",
+    issuerId: "issuer:delegation",
+    principalId: grantor.id,
+    principalType: grantor.type,
+    affiliations: canonicalGrantorAffiliations,
+    ...grantorCredentialScope,
+    issuedAt: START,
+    expiresAt: EXPIRY,
+    scopeHash: computeScopeHash(grantorCredentialScope),
+  };
+  const delegatedScope = {
+    capabilities: ["records:read"],
+    allowedActions: ["records:read"],
+    allowedResourceIds: [RESOURCE],
+  } as const;
+  const issueInput: IssueDelegationRequest = {
+    grantor,
+    grantorCredential,
+    delegate,
+    policy: staticPolicyInput,
+    ...delegatedScope,
+    expiresAt: ARTIFACT_EXPIRY,
+  };
+  const delegationSeed: CapabilityDelegation = {
+    version: 1,
+    id: "delegation:correlated",
+    issuerId: grantorCredential.issuerId,
+    grantorCredentialId: grantorCredential.id,
+    grantorId: grantor.id,
+    grantorType: grantor.type,
+    delegateId: delegate.id,
+    delegateType: delegate.type,
+    policyId: staticPolicy.id,
+    policyVersion: staticPolicy.version,
+    ...delegatedScope,
+    issuedAt: START,
+    expiresAt: ARTIFACT_EXPIRY,
+    scopeHash: computeScopeHash(delegatedScope),
+    delegationBindingHash: HASH_0,
+  };
+  const rebind = (delegation: CapabilityDelegation): CapabilityDelegation => ({
+    ...delegation,
+    delegationBindingHash: computeDelegationBindingHash(delegation as never),
+  });
+  const forge = (
+    overrides: Partial<CapabilityDelegation>,
+    recomputeScopeHash = false,
+  ): CapabilityDelegation => {
+    const altered = { ...delegationSeed, ...overrides };
+    const scoped = recomputeScopeHash
+      ? {
+        ...altered,
+        scopeHash: computeScopeHash({
+          capabilities: altered.capabilities,
+          allowedActions: altered.allowedActions,
+          allowedResourceIds: altered.allowedResourceIds,
+        }),
+      }
+      : altered;
+    return rebind(scoped);
+  };
+  const validDelegation = rebind(delegationSeed);
+  const clientFor = (delegation: CapabilityDelegation) => new ZkycReferenceClient({
+    baseUrl: "https://delegation-correlation.reference",
+    fetch: () => Promise.resolve(jsonResponse({ delegation }, 201)),
+  });
+
+  assert.equal(
+    (await clientFor(validDelegation).issueDelegation(issueInput)).delegation.id,
+    validDelegation.id,
+  );
+
+  const inputForgeries: readonly {
+    readonly name: string;
+    readonly input: IssueDelegationRequest;
+  }[] = [
+    {
+      name: "grantor credential principal ID",
+      input: {
+        ...issueInput,
+        grantorCredential: { ...grantorCredential, principalId: "principal:forged" },
+      },
+    },
+    {
+      name: "grantor credential principal type",
+      input: {
+        ...issueInput,
+        grantorCredential: { ...grantorCredential, principalType: "ORGANIZATION" },
+      },
+    },
+    {
+      name: "canonical grantor credential affiliations",
+      input: {
+        ...issueInput,
+        grantorCredential: {
+          ...grantorCredential,
+          affiliations: [{ organizationId: "organization:forged", role: "admin" }],
+        },
+      },
+    },
+    {
+      name: "grantor credential scope hash integrity",
+      input: { ...issueInput, grantorCredential: { ...grantorCredential, scopeHash: HASH_0 } },
+    },
+  ];
+  for (const forgery of inputForgeries) {
+    await t.test(forgery.name, async () => {
+      await expectInvalidResponse(() => clientFor(validDelegation).issueDelegation(forgery.input));
+    });
+  }
+
+  const responseForgeries: readonly {
+    readonly name: string;
+    readonly delegation: CapabilityDelegation;
+  }[] = [
+    { name: "grantor principal ID", delegation: forge({ grantorId: "principal:forged" }) },
+    { name: "grantor principal type", delegation: forge({ grantorType: "ORGANIZATION" }) },
+    {
+      name: "grantor credential ID",
+      delegation: forge({ grantorCredentialId: "credential:forged" }),
+    },
+    { name: "delegate ID", delegation: forge({ delegateId: "agent:forged" }) },
+    { name: "delegate type", delegation: forge({ delegateType: "ORGANIZATION" }) },
+    { name: "policy ID", delegation: forge({ policyId: "policy:forged" }) },
+    { name: "policy version", delegation: forge({ policyVersion: HASH_0 }) },
+    {
+      name: "canonical capabilities",
+      delegation: forge({ capabilities: ["records:write"] }, true),
+    },
+    {
+      name: "canonical allowed actions",
+      delegation: forge({ allowedActions: ["records:write"] }, true),
+    },
+    {
+      name: "canonical allowed resource IDs",
+      delegation: forge({ allowedResourceIds: ["record:other"] }, true),
+    },
+    { name: "delegation scope hash", delegation: forge({ scopeHash: HASH_0 }) },
+    {
+      name: "delegation binding hash",
+      delegation: { ...validDelegation, delegationBindingHash: HASH_0 },
+    },
+    { name: "expiry", delegation: forge({ expiresAt: EXPIRY }) },
+    { name: "issuer", delegation: forge({ issuerId: "issuer:forged" }) },
+  ];
+  for (const forgery of responseForgeries) {
+    await t.test(forgery.name, async () => {
+      await expectInvalidResponse(() => clientFor(forgery.delegation).issueDelegation(issueInput));
+    });
+  }
+});
 
 test("SDK rejects valid responses bound to a different requested authority record", async () => {
   const credentialClient = new ZkycReferenceClient({
