@@ -13,6 +13,7 @@ import {
   ZkycTransportError,
   type AccessDecision,
   type BoundAccessDecision,
+  type BoundDirectAccessDecision,
   type CapabilityDelegation,
   type ConsumeStepUpAuthorizationRequest,
   type Credential,
@@ -275,6 +276,305 @@ test("SDK accepts the real Hono credentialless direct denial without authority b
   assert.equal("credentialId" in evaluated.decision, false);
 });
 
+test("SDK accepts real Hono direct CREDENTIAL_MALFORMED without trusted bindings", async () => {
+  const { client } = harness();
+  const credential = await issueCredential(client, human, ["records:read"]);
+  const evaluated = await client.evaluate({
+    authorityMode: "DIRECT",
+    principal: human,
+    credential: { ...credential, scopeHash: HASH_0 },
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-malformed-direct-denial" },
+    policy: policy("ALLOW", "records:read"),
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_MALFORMED");
+  assert.equal("actingCredentialId" in evaluated.decision, false);
+  assert.equal("effectiveScopeHash" in evaluated.decision, false);
+  assert.equal("credentialId" in evaluated.decision, false);
+});
+
+test("SDK accepts real Hono direct CREDENTIAL_UNKNOWN without trusted bindings", async () => {
+  const { client } = harness();
+  const credential = await issueCredential(client, human, ["records:read"]);
+  const evaluated = await client.evaluate({
+    authorityMode: "DIRECT",
+    principal: human,
+    credential: { ...credential, id: "credential:unknown-direct" },
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-unknown-direct-denial" },
+    policy: policy("ALLOW", "records:read"),
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_UNKNOWN");
+  assert.equal("actingCredentialId" in evaluated.decision, false);
+  assert.equal("effectiveScopeHash" in evaluated.decision, false);
+  assert.equal("credentialId" in evaluated.decision, false);
+});
+
+async function issueDelegatedFixture(client: ZkycReferenceClient) {
+  const grantor: Principal = { id: "organization:fixture-grantor", type: "ORGANIZATION", affiliations: [] };
+  const delegate: Principal = { id: "agent:fixture-delegate", type: "AGENT", affiliations: [] };
+  const grantorCredential = await issueCredential(client, grantor, ["records:read"]);
+  const delegateIdentityCredential = await issueCredential(
+    client,
+    delegate,
+    ["identity:act"],
+    ["records:read"],
+  );
+  const delegatedPolicy = policy("ALLOW", "records:read");
+  const { delegation } = await client.issueDelegation({
+    grantor,
+    grantorCredential,
+    delegate,
+    policy: delegatedPolicy,
+    capabilities: ["records:read"],
+    allowedActions: ["records:read"],
+    allowedResourceIds: [RESOURCE],
+    expiresAt: ARTIFACT_EXPIRY,
+  });
+  return { grantor, delegate, grantorCredential, delegateIdentityCredential, delegatedPolicy, delegation };
+}
+
+test("SDK accepts real Hono delegated CREDENTIAL_MALFORMED without trusted bindings", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  const evaluated = await client.evaluate({
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: { ...fixture.delegateIdentityCredential, scopeHash: HASH_0 },
+    grantorCredential: fixture.grantorCredential,
+    delegation: fixture.delegation,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-malformed-delegate-credential" },
+    policy: fixture.delegatedPolicy,
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_MALFORMED");
+  assert.equal(evaluated.decision.authorityMode, "DELEGATED");
+  assert.equal("actingCredentialId" in evaluated.decision, false);
+  assert.equal("effectiveScopeHash" in evaluated.decision, false);
+  assert.equal("grantorId" in evaluated.decision, false);
+});
+
+test("SDK accepts real Hono delegated CREDENTIAL_UNKNOWN without trusted bindings", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  const evaluated = await client.evaluate({
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: {
+      ...fixture.delegateIdentityCredential,
+      id: "credential:unknown-delegate",
+    },
+    grantorCredential: fixture.grantorCredential,
+    delegation: fixture.delegation,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-unknown-delegate-credential" },
+    policy: fixture.delegatedPolicy,
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_UNKNOWN");
+  assert.equal(evaluated.decision.authorityMode, "DELEGATED");
+  assert.equal("actingCredentialId" in evaluated.decision, false);
+  assert.equal("effectiveScopeHash" in evaluated.decision, false);
+  assert.equal("grantorId" in evaluated.decision, false);
+});
+
+test("SDK accepts real Hono delegated acting-only DELEGATION_MALFORMED", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  const evaluated = await client.evaluate({
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: fixture.delegateIdentityCredential,
+    grantorCredential: fixture.grantorCredential,
+    delegation: { ...fixture.delegation, scopeHash: HASH_0 },
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-malformed-delegation" },
+    policy: fixture.delegatedPolicy,
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "DELEGATION_MALFORMED");
+  assert.equal(evaluated.decision.actingCredentialId, fixture.delegateIdentityCredential.id);
+  assert.equal(evaluated.decision.effectiveScopeHash, fixture.delegateIdentityCredential.scopeHash);
+  assert.equal("grantorId" in evaluated.decision, false);
+  assert.equal("delegationId" in evaluated.decision, false);
+});
+
+test("SDK accepts real Hono delegated acting-only DELEGATION_IDENTITIES_NOT_DISTINCT", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  const evaluated = await client.evaluate({
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: fixture.delegateIdentityCredential,
+    grantorCredential: fixture.delegateIdentityCredential,
+    delegation: fixture.delegation,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-identities-not-distinct" },
+    policy: fixture.delegatedPolicy,
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "DELEGATION_IDENTITIES_NOT_DISTINCT");
+  assert.equal(evaluated.decision.actingCredentialId, fixture.delegateIdentityCredential.id);
+  assert.equal(evaluated.decision.effectiveScopeHash, fixture.delegateIdentityCredential.scopeHash);
+  assert.equal("grantorId" in evaluated.decision, false);
+  assert.equal("delegationId" in evaluated.decision, false);
+});
+
+test("SDK preserves issuance DELEGATION_IDENTITIES_NOT_DISTINCT as an HTTP domain error", async () => {
+  const { client } = harness();
+  const principal: Principal = { id: "organization:same-party", type: "ORGANIZATION", affiliations: [] };
+  const grantorCredential = await issueCredential(client, principal, ["records:read"]);
+
+  await assert.rejects(
+    () => client.issueDelegation({
+      grantor: principal,
+      grantorCredential,
+      delegate: principal,
+      policy: policy("ALLOW", "records:read"),
+      capabilities: ["records:read"],
+      allowedActions: ["records:read"],
+      allowedResourceIds: [RESOURCE],
+      expiresAt: ARTIFACT_EXPIRY,
+    }),
+    (error: unknown) =>
+      error instanceof ZkycApiError &&
+      error.status === 400 &&
+      error.code === "DELEGATION_IDENTITIES_NOT_DISTINCT",
+  );
+});
+
+test("SDK accepts real Hono fully bound DELEGATION_POLICY_MISMATCH", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  const evaluated = await client.evaluate({
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: fixture.delegateIdentityCredential,
+    grantorCredential: fixture.grantorCredential,
+    delegation: fixture.delegation,
+    action: "records:export",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-delegation-policy-mismatch" },
+    policy: policy("STEP_UP", "records:export"),
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "DELEGATION_POLICY_MISMATCH");
+  assert.equal(evaluated.decision.effectiveScopeHash, fixture.delegation.scopeHash);
+  assert.equal(evaluated.decision.grantorId, fixture.delegation.grantorId);
+  assert.equal(evaluated.decision.delegationId, fixture.delegation.id);
+  assert.equal(evaluated.receipt, undefined);
+});
+
+test("SDK accepts real Hono fully bound malformed grantor credential denial", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  const evaluated = await client.evaluate({
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: fixture.delegateIdentityCredential,
+    grantorCredential: {} as Credential,
+    delegation: fixture.delegation,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-malformed-grantor-credential" },
+    policy: fixture.delegatedPolicy,
+    issueReceipt: false,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "DELEGATION_GRANTOR_CREDENTIAL_INVALID");
+  assert.equal(evaluated.decision.effectiveScopeHash, fixture.delegation.scopeHash);
+  assert.equal(evaluated.decision.grantorCredentialId, fixture.delegation.grantorCredentialId);
+  assert.equal(evaluated.decision.delegationId, fixture.delegation.id);
+  assert.equal(evaluated.receipt, undefined);
+});
+
+test("SDK rejects prohibited and mixed delegated denial bindings", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  const delegatedPolicy = createPolicy(fixture.delegatedPolicy);
+  const input = {
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: fixture.delegateIdentityCredential,
+    grantorCredential: fixture.grantorCredential,
+    delegation: fixture.delegation,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: {},
+    policy: fixture.delegatedPolicy,
+    issueReceipt: false,
+  } as const;
+  const unbound = {
+    version: 2,
+    outcome: "DENY",
+    reasonCode: "CREDENTIAL_UNKNOWN",
+    authorityMode: "DELEGATED",
+    subjectId: fixture.delegate.id,
+    subjectType: fixture.delegate.type,
+    action: "records:read",
+    actionSensitivity: "ROUTINE",
+    resourceId: RESOURCE,
+    contextHash: emptyContextHash,
+    policyId: delegatedPolicy.id,
+    policyVersion: delegatedPolicy.version,
+    decidedAt: START,
+  } as const;
+  const actingOnly = {
+    ...unbound,
+    reasonCode: "DELEGATION_MALFORMED",
+    actingCredentialId: fixture.delegateIdentityCredential.id,
+    effectiveScopeHash: fixture.delegateIdentityCredential.scopeHash,
+  } as const;
+  const fullyBound = {
+    ...actingOnly,
+    grantorId: fixture.delegation.grantorId,
+    grantorType: fixture.delegation.grantorType,
+    grantorCredentialId: fixture.delegation.grantorCredentialId,
+    delegationId: fixture.delegation.id,
+    delegationBindingHash: fixture.delegation.delegationBindingHash,
+  } as const;
+
+  for (const decision of [
+    { ...unbound, reasonCode: "POLICY_DENY" },
+    { ...unbound, unverifiedMetadata: {} },
+    { ...unbound, actingCredentialId: fixture.delegateIdentityCredential.id },
+    { ...unbound, effectiveScopeHash: fixture.delegateIdentityCredential.scopeHash },
+    { ...actingOnly, credentialId: fixture.delegateIdentityCredential.id },
+    { ...actingOnly, grantorId: fixture.delegation.grantorId },
+    { ...actingOnly, reasonCode: "DELEGATION_GRANTOR_CREDENTIAL_INVALID" },
+    {
+      ...actingOnly,
+      reasonCode: "CREDENTIAL_REVOKED",
+      unverifiedMetadata: { zkPassProofId: "proof:must-not-be-echoed" },
+    },
+    { ...fullyBound, reasonCode: "CREDENTIAL_UNKNOWN" },
+    { ...fullyBound, reasonCode: "DELEGATION_MALFORMED" },
+    { ...fullyBound, reasonCode: "DELEGATION_UNKNOWN" },
+  ]) {
+    const forgedClient = new ZkycReferenceClient({
+      baseUrl: "https://invalid.reference",
+      fetch: () => Promise.resolve(jsonResponse({ logId: "decision-log:mixed-denial", decision })),
+    });
+    await expectInvalidResponse(() => forgedClient.evaluate(input));
+  }
+});
+
 test("SDK executes delegated issuance, evaluation, onboarding, receipt, and revocation", async () => {
   const { client } = harness();
   const grantor: Principal = { id: "organization:grantor", type: "ORGANIZATION", affiliations: [] };
@@ -452,6 +752,15 @@ const staticDecision: AccessDecision = {
   credentialId: staticCredential.id,
   decidedAt: START,
 };
+
+// @ts-expect-error Inactive direct credential denials never carry unverified metadata.
+const invalidInactiveDirectMetadataDecision: BoundDirectAccessDecision = {
+  ...staticDecision,
+  outcome: "DENY",
+  reasonCode: "CREDENTIAL_REVOKED",
+  unverifiedMetadata: { zkPassProofId: "proof:must-not-be-typed" },
+};
+void invalidInactiveDirectMetadataDecision;
 
 const staticStepUpRequest = {
   version: 2,
@@ -1058,6 +1367,12 @@ test("SDK rejects v0.3 successful responses with missing, unknown, or mixed auth
 
   for (const malformedDecision of [
     { ...staticDecision, subjectType: undefined },
+    {
+      ...staticDecision,
+      outcome: "DENY",
+      reasonCode: "CREDENTIAL_REVOKED",
+      unverifiedMetadata: { zkPassProofId: "proof:must-not-be-accepted" },
+    },
     { ...staticDecision, authorityMode: "DELEGATED" },
     { ...staticDecision, grantorId: "organization:injected" },
     { ...staticDecision, requiredApproverCapability: "approval:unexpected" },
