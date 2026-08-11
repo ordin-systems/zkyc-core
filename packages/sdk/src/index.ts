@@ -49,6 +49,7 @@ export type ReasonCode =
   | "DELEGATION_GRANTOR_CREDENTIAL_INVALID"
   | "DELEGATION_GRANTOR_MISMATCH"
   | "DELEGATION_DELEGATE_MISMATCH"
+  | "DELEGATION_IDENTITIES_NOT_DISTINCT"
   | "ACTION_OUTSIDE_DELEGATION_SCOPE"
   | "RESOURCE_OUTSIDE_DELEGATION_SCOPE"
   | "INSUFFICIENT_DELEGATED_CAPABILITY"
@@ -142,10 +143,29 @@ interface CommonBoundAccessDecision extends CommonAccessDecision {
   readonly actingCredentialId: string;
   readonly effectiveScopeHash: string;
   readonly requiredApproverCapability?: string;
-  readonly unverifiedMetadata?: UnverifiedMetadata;
 }
 
-export interface BoundDirectAccessDecision extends CommonBoundAccessDecision {
+export type InactiveBoundDirectDenyReasonCode =
+  | "CREDENTIAL_NOT_YET_VALID"
+  | "CREDENTIAL_EXPIRED"
+  | "CREDENTIAL_REVOKED";
+
+export type TrustedBoundDirectReasonCode =
+  | "POLICY_ALLOW"
+  | "POLICY_DENY"
+  | "HUMAN_APPROVAL_REQUIRED"
+  | "CREDENTIAL_SUBJECT_MISMATCH"
+  | "ACTION_OUTSIDE_CREDENTIAL_SCOPE"
+  | "RESOURCE_OUTSIDE_CREDENTIAL_SCOPE"
+  | "INSUFFICIENT_CAPABILITY"
+  | "AFFILIATION_REQUIRED"
+  | "ACTION_NOT_PERMITTED";
+
+export type BoundDirectReasonCode =
+  | InactiveBoundDirectDenyReasonCode
+  | TrustedBoundDirectReasonCode;
+
+interface CommonBoundDirectAccessDecision extends CommonBoundAccessDecision {
   readonly authorityMode: "DIRECT";
   /** @deprecated Direct-mode compatibility alias. When present it equals actingCredentialId. */
   readonly credentialId?: string;
@@ -156,10 +176,31 @@ export interface BoundDirectAccessDecision extends CommonBoundAccessDecision {
   readonly delegationBindingHash?: never;
 }
 
+export interface InactiveBoundDirectDenyAccessDecision extends CommonBoundDirectAccessDecision {
+  readonly outcome: "DENY";
+  readonly reasonCode: InactiveBoundDirectDenyReasonCode;
+  readonly requiredApproverCapability?: never;
+  readonly unverifiedMetadata?: never;
+}
+
+export interface TrustedBoundDirectAccessDecision extends CommonBoundDirectAccessDecision {
+  readonly reasonCode: TrustedBoundDirectReasonCode;
+  readonly unverifiedMetadata?: UnverifiedMetadata;
+}
+
+export type BoundDirectAccessDecision =
+  | InactiveBoundDirectDenyAccessDecision
+  | TrustedBoundDirectAccessDecision;
+
+export type UnboundDirectDenyReasonCode =
+  | "CREDENTIAL_MISSING"
+  | "CREDENTIAL_MALFORMED"
+  | "CREDENTIAL_UNKNOWN";
+
 export interface UnboundDirectDenyAccessDecision extends CommonAccessDecision {
   readonly authorityMode: "DIRECT";
   readonly outcome: "DENY";
-  readonly reasonCode: "CREDENTIAL_MISSING";
+  readonly reasonCode: UnboundDirectDenyReasonCode;
   readonly actingCredentialId?: never;
   readonly effectiveScopeHash?: never;
   readonly credentialId?: never;
@@ -172,20 +213,99 @@ export interface UnboundDirectDenyAccessDecision extends CommonAccessDecision {
   readonly unverifiedMetadata?: never;
 }
 
-export type DirectAccessDecision = BoundDirectAccessDecision | UnboundDirectDenyAccessDecision;
+export type UnboundDelegatedDenyReasonCode =
+  | "CREDENTIAL_MISSING"
+  | "CREDENTIAL_MALFORMED"
+  | "CREDENTIAL_UNKNOWN"
+  | "DELEGATION_GRANTOR_CREDENTIAL_INVALID";
+
+export interface UnboundDelegatedDenyAccessDecision extends CommonAccessDecision {
+  readonly authorityMode: "DELEGATED";
+  readonly outcome: "DENY";
+  readonly reasonCode: UnboundDelegatedDenyReasonCode;
+  readonly actingCredentialId?: never;
+  readonly effectiveScopeHash?: never;
+  readonly credentialId?: never;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
+  readonly requiredApproverCapability?: never;
+  readonly unverifiedMetadata?: never;
+}
+
+interface CommonActingOnlyDelegatedDenyAccessDecision extends CommonAccessDecision {
+  readonly authorityMode: "DELEGATED";
+  readonly outcome: "DENY";
+  readonly actingCredentialId: string;
+  readonly effectiveScopeHash: string;
+  readonly credentialId?: never;
+  readonly grantorId?: never;
+  readonly grantorType?: never;
+  readonly grantorCredentialId?: never;
+  readonly delegationId?: never;
+  readonly delegationBindingHash?: never;
+  readonly requiredApproverCapability?: never;
+}
+
+export interface InactiveActingOnlyDelegatedDenyAccessDecision
+  extends CommonActingOnlyDelegatedDenyAccessDecision {
+  readonly reasonCode: "CREDENTIAL_NOT_YET_VALID" | "CREDENTIAL_EXPIRED" | "CREDENTIAL_REVOKED";
+  readonly unverifiedMetadata?: never;
+}
+
+export interface TrustedActingOnlyDelegatedDenyAccessDecision
+  extends CommonActingOnlyDelegatedDenyAccessDecision {
+  readonly reasonCode:
+    | "DELEGATION_MALFORMED"
+    | "DELEGATION_UNKNOWN"
+    | "DELEGATION_DELEGATE_MISMATCH"
+    | "DELEGATION_IDENTITIES_NOT_DISTINCT";
+  readonly unverifiedMetadata?: UnverifiedMetadata;
+}
+
+export type ActingOnlyDelegatedDenyAccessDecision =
+  | InactiveActingOnlyDelegatedDenyAccessDecision
+  | TrustedActingOnlyDelegatedDenyAccessDecision;
+
+export type FullyBoundDelegatedReasonCode =
+  | "POLICY_ALLOW"
+  | "POLICY_DENY"
+  | "HUMAN_APPROVAL_REQUIRED"
+  | "DELEGATION_NOT_YET_VALID"
+  | "DELEGATION_EXPIRED"
+  | "DELEGATION_REVOKED"
+  | "DELEGATION_POLICY_MISMATCH"
+  | "DELEGATION_GRANTOR_CREDENTIAL_INVALID"
+  | "DELEGATION_GRANTOR_MISMATCH"
+  | "DELEGATION_DELEGATE_MISMATCH"
+  | "DELEGATION_IDENTITIES_NOT_DISTINCT"
+  | "ACTION_OUTSIDE_DELEGATION_SCOPE"
+  | "RESOURCE_OUTSIDE_DELEGATION_SCOPE"
+  | "INSUFFICIENT_DELEGATED_CAPABILITY"
+  | "AFFILIATION_REQUIRED"
+  | "ACTION_NOT_PERMITTED";
 
 export interface DelegatedAccessDecision extends CommonBoundAccessDecision {
   readonly authorityMode: "DELEGATED";
+  readonly reasonCode: FullyBoundDelegatedReasonCode;
   readonly credentialId?: never;
   readonly grantorId: string;
   readonly grantorType: PrincipalType;
   readonly grantorCredentialId: string;
   readonly delegationId: string;
   readonly delegationBindingHash: string;
+  readonly unverifiedMetadata?: UnverifiedMetadata;
 }
 
+export type DirectAccessDecision = BoundDirectAccessDecision | UnboundDirectDenyAccessDecision;
 export type BoundAccessDecision = BoundDirectAccessDecision | DelegatedAccessDecision;
-export type AccessDecision = BoundAccessDecision | UnboundDirectDenyAccessDecision;
+export type AccessDecision =
+  | DirectAccessDecision
+  | DelegatedAccessDecision
+  | UnboundDelegatedDenyAccessDecision
+  | ActingOnlyDelegatedDenyAccessDecision;
 
 interface CommonReceiptBinding {
   readonly authorityMode: AuthorityMode;
@@ -875,50 +995,106 @@ export class ZkycReferenceClient {
             Date.parse(response.receipt.payload.expiresAt) <= Date.parse(input.receiptExpiresAt)),
       );
       if (input.authorityMode === "DIRECT") {
-        if (input.credential === null) {
+        const isUnbound = decision.actingCredentialId === undefined &&
+          decision.effectiveScopeHash === undefined &&
+          decision.credentialId === undefined;
+        if (isUnbound) {
           requireResponseCorrelation(
             decision.authorityMode === "DIRECT" &&
             decision.outcome === "DENY" &&
-            decision.reasonCode === "CREDENTIAL_MISSING" &&
-            decision.actingCredentialId === undefined &&
-            decision.effectiveScopeHash === undefined &&
-            decision.credentialId === undefined &&
+            (input.credential === null
+              ? decision.reasonCode === "CREDENTIAL_MISSING"
+              : decision.reasonCode === "CREDENTIAL_MALFORMED" ||
+                decision.reasonCode === "CREDENTIAL_UNKNOWN") &&
             response.receipt === undefined,
           );
         } else {
-          const expectedScopeHash = await computeScopeHash(input.credential);
+          requireResponseCorrelation(input.credential !== null);
+          const expectedScopeHash = await computeScopeHash(input.credential as Credential);
           requireResponseCorrelation(
             decision.authorityMode === "DIRECT" &&
-            decision.reasonCode !== "CREDENTIAL_MISSING" &&
-            decision.actingCredentialId === input.credential.id &&
-            input.credential.scopeHash === expectedScopeHash &&
+            decision.actingCredentialId === input.credential?.id &&
+            input.credential?.scopeHash === expectedScopeHash &&
             decision.effectiveScopeHash === expectedScopeHash,
           );
         }
       } else {
-        const expectedDelegationScopeHash = await computeScopeHash(input.delegation);
-        const expectedDelegateCredentialScopeHash = await computeScopeHash(input.delegateIdentityCredential);
-        const expectedGrantorCredentialScopeHash = await computeScopeHash(input.grantorCredential);
-        const expectedDelegationBindingHash = await computeDelegationBindingHash(input.delegation);
-        requireResponseCorrelation(
-          decision.authorityMode === "DELEGATED" &&
-          decision.reasonCode !== "CREDENTIAL_MISSING" &&
-          input.delegateIdentityCredential.scopeHash === expectedDelegateCredentialScopeHash &&
-          input.grantorCredential.scopeHash === expectedGrantorCredentialScopeHash &&
-          input.delegation.scopeHash === expectedDelegationScopeHash &&
-          input.delegation.delegationBindingHash === expectedDelegationBindingHash &&
-          input.delegation.issuerId === input.grantorCredential.issuerId &&
-          input.delegateIdentityCredential.issuerId === input.grantorCredential.issuerId &&
-          input.delegation.policyId === expectedPolicy.id &&
-          input.delegation.policyVersion === expectedPolicy.version &&
-          decision.actingCredentialId === input.delegateIdentityCredential.id &&
-          decision.effectiveScopeHash === expectedDelegationScopeHash &&
-          decision.grantorId === input.delegation.grantorId &&
-          decision.grantorType === input.delegation.grantorType &&
-          decision.grantorCredentialId === input.delegation.grantorCredentialId &&
-          decision.delegationId === input.delegation.id &&
-          decision.delegationBindingHash === input.delegation.delegationBindingHash,
-        );
+        const isUnbound = decision.actingCredentialId === undefined &&
+          decision.effectiveScopeHash === undefined;
+        if (isUnbound) {
+          requireResponseCorrelation(
+            decision.authorityMode === "DELEGATED" &&
+            decision.outcome === "DENY" &&
+            (decision.reasonCode === "CREDENTIAL_MISSING" ||
+              decision.reasonCode === "CREDENTIAL_MALFORMED" ||
+              decision.reasonCode === "CREDENTIAL_UNKNOWN" ||
+              decision.reasonCode === "DELEGATION_GRANTOR_CREDENTIAL_INVALID") &&
+            response.receipt === undefined,
+          );
+        } else {
+          const expectedDelegateCredentialScopeHash = await computeScopeHash(
+            input.delegateIdentityCredential,
+          );
+          requireResponseCorrelation(
+            decision.authorityMode === "DELEGATED" &&
+            input.delegateIdentityCredential.scopeHash === expectedDelegateCredentialScopeHash &&
+            decision.actingCredentialId === input.delegateIdentityCredential.id,
+          );
+          if (decision.grantorId === undefined) {
+            const delegateIdentityMismatch =
+              input.delegateIdentityCredential.principalId !== input.principal.id ||
+              input.delegateIdentityCredential.principalType !== input.principal.type ||
+              !sameCanonicalAffiliations(
+                input.delegateIdentityCredential.affiliations,
+                input.principal.affiliations,
+              );
+            requireResponseCorrelation(
+              decision.outcome === "DENY" &&
+              decision.effectiveScopeHash === expectedDelegateCredentialScopeHash &&
+              response.receipt === undefined &&
+              (decision.reasonCode !== "DELEGATION_IDENTITIES_NOT_DISTINCT" ||
+                input.delegateIdentityCredential.id === input.grantorCredential.id) &&
+              (decision.reasonCode !== "DELEGATION_DELEGATE_MISMATCH" ||
+                delegateIdentityMismatch),
+            );
+          } else {
+            const expectedDelegationScopeHash = await computeScopeHash(input.delegation);
+            const expectedDelegationBindingHash = await computeDelegationBindingHash(input.delegation);
+            const delegationMatchesExpectedPolicy =
+              input.delegation.policyId === expectedPolicy.id &&
+              input.delegation.policyVersion === expectedPolicy.version;
+            const decisionPrecedesGrantorCredentialValidation =
+              decision.reasonCode === "DELEGATION_NOT_YET_VALID" ||
+              decision.reasonCode === "DELEGATION_EXPIRED" ||
+              decision.reasonCode === "DELEGATION_REVOKED" ||
+              decision.reasonCode === "DELEGATION_POLICY_MISMATCH" ||
+              decision.reasonCode === "DELEGATION_GRANTOR_CREDENTIAL_INVALID" ||
+              decision.reasonCode === "DELEGATION_DELEGATE_MISMATCH" ||
+              decision.reasonCode === "DELEGATION_IDENTITIES_NOT_DISTINCT";
+            let grantorCredentialCorrelates = true;
+            if (!decisionPrecedesGrantorCredentialValidation) {
+              const expectedGrantorCredentialScopeHash = await computeScopeHash(input.grantorCredential);
+              grantorCredentialCorrelates =
+                input.grantorCredential.scopeHash === expectedGrantorCredentialScopeHash &&
+                input.delegation.issuerId === input.grantorCredential.issuerId;
+            }
+            requireResponseCorrelation(
+              input.delegation.scopeHash === expectedDelegationScopeHash &&
+              input.delegation.delegationBindingHash === expectedDelegationBindingHash &&
+              input.delegateIdentityCredential.issuerId === input.delegation.issuerId &&
+              (decision.reasonCode === "DELEGATION_POLICY_MISMATCH"
+                ? !delegationMatchesExpectedPolicy
+                : delegationMatchesExpectedPolicy) &&
+              grantorCredentialCorrelates &&
+              decision.effectiveScopeHash === expectedDelegationScopeHash &&
+              decision.grantorId === input.delegation.grantorId &&
+              decision.grantorType === input.delegation.grantorType &&
+              decision.grantorCredentialId === input.delegation.grantorCredentialId &&
+              decision.delegationId === input.delegation.id &&
+              decision.delegationBindingHash === input.delegation.delegationBindingHash,
+            );
+          }
+        }
       }
       return response;
     }, "POST", input);

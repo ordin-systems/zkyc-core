@@ -54,6 +54,7 @@ const reasonCodes = new Set<ReasonCode>([
   "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
   "DELEGATION_GRANTOR_MISMATCH",
   "DELEGATION_DELEGATE_MISMATCH",
+  "DELEGATION_IDENTITIES_NOT_DISTINCT",
   "ACTION_OUTSIDE_DELEGATION_SCOPE",
   "RESOURCE_OUTSIDE_DELEGATION_SCOPE",
   "INSUFFICIENT_DELEGATED_CAPABILITY",
@@ -69,6 +70,61 @@ const delegatedBindingFields = [
   "delegationId",
   "delegationBindingHash",
 ] as const;
+
+const unboundDirectDenyReasons = new Set<ReasonCode>([
+  "CREDENTIAL_MISSING",
+  "CREDENTIAL_MALFORMED",
+  "CREDENTIAL_UNKNOWN",
+]);
+const unboundDelegatedDenyReasons = new Set<ReasonCode>([
+  "CREDENTIAL_MISSING",
+  "CREDENTIAL_MALFORMED",
+  "CREDENTIAL_UNKNOWN",
+  "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+]);
+const inactiveActingOnlyDelegatedDenyReasons = new Set<ReasonCode>([
+  "CREDENTIAL_NOT_YET_VALID",
+  "CREDENTIAL_EXPIRED",
+  "CREDENTIAL_REVOKED",
+]);
+const trustedActingOnlyDelegatedDenyReasons = new Set<ReasonCode>([
+  "DELEGATION_MALFORMED",
+  "DELEGATION_UNKNOWN",
+  "DELEGATION_DELEGATE_MISMATCH",
+  "DELEGATION_IDENTITIES_NOT_DISTINCT",
+]);
+const boundDirectReasons = new Set<ReasonCode>([
+  "POLICY_ALLOW",
+  "POLICY_DENY",
+  "HUMAN_APPROVAL_REQUIRED",
+  "CREDENTIAL_NOT_YET_VALID",
+  "CREDENTIAL_EXPIRED",
+  "CREDENTIAL_REVOKED",
+  "CREDENTIAL_SUBJECT_MISMATCH",
+  "ACTION_OUTSIDE_CREDENTIAL_SCOPE",
+  "RESOURCE_OUTSIDE_CREDENTIAL_SCOPE",
+  "INSUFFICIENT_CAPABILITY",
+  "AFFILIATION_REQUIRED",
+  "ACTION_NOT_PERMITTED",
+]);
+const fullyBoundDelegatedReasons = new Set<ReasonCode>([
+  "POLICY_ALLOW",
+  "POLICY_DENY",
+  "HUMAN_APPROVAL_REQUIRED",
+  "DELEGATION_NOT_YET_VALID",
+  "DELEGATION_EXPIRED",
+  "DELEGATION_REVOKED",
+  "DELEGATION_POLICY_MISMATCH",
+  "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+  "DELEGATION_GRANTOR_MISMATCH",
+  "DELEGATION_DELEGATE_MISMATCH",
+  "DELEGATION_IDENTITIES_NOT_DISTINCT",
+  "ACTION_OUTSIDE_DELEGATION_SCOPE",
+  "RESOURCE_OUTSIDE_DELEGATION_SCOPE",
+  "INSUFFICIENT_DELEGATED_CAPABILITY",
+  "AFFILIATION_REQUIRED",
+  "ACTION_NOT_PERMITTED",
+]);
 
 function invalid(): never {
   throw new InvalidProtocolResponse();
@@ -362,30 +418,59 @@ function validateDecisionValue(value: unknown): AccessDecision {
   const mode = authorityMode(initial.authorityMode);
   const decisionOutcome = outcome(initial.outcome);
   const decisionReason = reasonCode(initial.reasonCode);
-  const isUnboundDirectDenial = mode === "DIRECT" &&
-    !Object.hasOwn(initial, "actingCredentialId") &&
-    !Object.hasOwn(initial, "effectiveScopeHash") &&
-    !Object.hasOwn(initial, "credentialId");
-  if (isUnboundDirectDenial) {
+  const hasActingCredential = Object.hasOwn(initial, "actingCredentialId");
+  const hasEffectiveScope = Object.hasOwn(initial, "effectiveScopeHash");
+  if (hasActingCredential !== hasEffectiveScope) invalid();
+
+  const core = {
+    version: 2 as const,
+    outcome: decisionOutcome,
+    reasonCode: decisionReason,
+    authorityMode: mode,
+    subjectId: identifier(initial.subjectId),
+    subjectType: principalType(initial.subjectType),
+    action: identifier(initial.action),
+    actionSensitivity: sensitivity(initial.actionSensitivity),
+    resourceId: identifier(initial.resourceId),
+    contextHash: hash(initial.contextHash),
+    policyId: identifier(initial.policyId),
+    policyVersion: hash(initial.policyVersion),
+    decidedAt: timestamp(initial.decidedAt),
+  };
+  if (initial.version !== 2) invalid();
+
+  if (!hasActingCredential) {
     record(value, decisionCoreFields);
-    if (decisionOutcome !== "DENY" || decisionReason !== "CREDENTIAL_MISSING") invalid();
-    if (initial.version !== 2) invalid();
-    return {
-      version: 2,
-      outcome: "DENY",
-      reasonCode: "CREDENTIAL_MISSING",
-      authorityMode: "DIRECT",
-      subjectId: identifier(initial.subjectId),
-      subjectType: principalType(initial.subjectType),
-      action: identifier(initial.action),
-      actionSensitivity: sensitivity(initial.actionSensitivity),
-      resourceId: identifier(initial.resourceId),
-      contextHash: hash(initial.contextHash),
-      policyId: identifier(initial.policyId),
-      policyVersion: hash(initial.policyVersion),
-      decidedAt: timestamp(initial.decidedAt),
-    };
+    const allowedReasons = mode === "DIRECT" ? unboundDirectDenyReasons : unboundDelegatedDenyReasons;
+    if (decisionOutcome !== "DENY" || !allowedReasons.has(decisionReason)) invalid();
+    return { ...core, outcome: "DENY", authorityMode: mode } as AccessDecision;
   }
+
+  const hasDelegatedBinding = delegatedBindingFields.some((field) => Object.hasOwn(initial, field));
+  if (mode === "DELEGATED" && !hasDelegatedBinding) {
+    record(
+      value,
+      [...decisionCommonFields, "unverifiedMetadata"],
+      decisionCommonFields,
+    );
+    const inactiveCredentialReason = inactiveActingOnlyDelegatedDenyReasons.has(decisionReason);
+    if (
+      decisionOutcome !== "DENY" ||
+      (!inactiveCredentialReason && !trustedActingOnlyDelegatedDenyReasons.has(decisionReason)) ||
+      (inactiveCredentialReason && Object.hasOwn(initial, "unverifiedMetadata"))
+    ) invalid();
+    return {
+      ...core,
+      outcome: "DENY",
+      authorityMode: "DELEGATED",
+      actingCredentialId: identifier(initial.actingCredentialId),
+      effectiveScopeHash: hash(initial.effectiveScopeHash),
+      ...(initial.unverifiedMetadata === undefined
+        ? {}
+        : { unverifiedMetadata: metadata(initial.unverifiedMetadata) }),
+    } as AccessDecision;
+  }
+
   record(
     value,
     mode === "DIRECT"
@@ -398,30 +483,24 @@ function validateDecisionValue(value: unknown): AccessDecision {
       ],
     mode === "DIRECT" ? decisionCommonFields : [...decisionCommonFields, ...delegatedBindingFields],
   );
-  if (initial.version !== 2) invalid();
+  if (mode === "DIRECT" && !boundDirectReasons.has(decisionReason)) invalid();
+  if (mode === "DELEGATED" && !fullyBoundDelegatedReasons.has(decisionReason)) invalid();
   if (decisionOutcome === "ALLOW" && decisionReason !== "POLICY_ALLOW") invalid();
   if (decisionOutcome === "STEP_UP" && decisionReason !== "HUMAN_APPROVAL_REQUIRED") invalid();
   if (
     decisionOutcome === "DENY" &&
     (decisionReason === "POLICY_ALLOW" || decisionReason === "HUMAN_APPROVAL_REQUIRED")
   ) invalid();
+  if (
+    mode === "DIRECT" &&
+    inactiveActingOnlyDelegatedDenyReasons.has(decisionReason) &&
+    Object.hasOwn(initial, "unverifiedMetadata")
+  ) invalid();
   const actingCredentialId = identifier(initial.actingCredentialId);
   const common = {
-    version: 2 as const,
-    outcome: decisionOutcome,
-    reasonCode: decisionReason,
-    authorityMode: mode,
-    subjectId: identifier(initial.subjectId),
-    subjectType: principalType(initial.subjectType),
+    ...core,
     actingCredentialId,
     effectiveScopeHash: hash(initial.effectiveScopeHash),
-    action: identifier(initial.action),
-    actionSensitivity: sensitivity(initial.actionSensitivity),
-    resourceId: identifier(initial.resourceId),
-    contextHash: hash(initial.contextHash),
-    policyId: identifier(initial.policyId),
-    policyVersion: hash(initial.policyVersion),
-    decidedAt: timestamp(initial.decidedAt),
     ...(assertDecisionCapability(decisionOutcome, initial) === undefined
       ? {}
       : { requiredApproverCapability: identifier(initial.requiredApproverCapability) }),
@@ -430,10 +509,10 @@ function validateDecisionValue(value: unknown): AccessDecision {
       : { unverifiedMetadata: metadata(initial.unverifiedMetadata) }),
   };
   if (mode === "DIRECT") {
-    if (initial.credentialId === undefined) return { ...common, authorityMode: "DIRECT" };
+    if (initial.credentialId === undefined) return { ...common, authorityMode: "DIRECT" } as AccessDecision;
     const credentialId = identifier(initial.credentialId);
     if (credentialId !== actingCredentialId) invalid();
-    return { ...common, authorityMode: "DIRECT", credentialId };
+    return { ...common, authorityMode: "DIRECT", credentialId } as AccessDecision;
   }
   return {
     ...common,
@@ -443,7 +522,7 @@ function validateDecisionValue(value: unknown): AccessDecision {
     grantorCredentialId: identifier(initial.grantorCredentialId),
     delegationId: identifier(initial.delegationId),
     delegationBindingHash: hash(initial.delegationBindingHash),
-  };
+  } as AccessDecision;
 }
 
 const receiptCommonFields = [

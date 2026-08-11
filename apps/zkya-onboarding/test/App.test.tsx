@@ -6,12 +6,13 @@ import {
   ZkycTransportError,
   type AccessDecision,
   type BoundAccessDecision,
-  type BoundDirectAccessDecision,
   type CapabilityDelegation,
   type Credential,
   type OnboardingView,
   type SignedReceipt,
   type StepUpRequest,
+  type TrustedBoundDirectAccessDecision,
+  type TrustedBoundDirectReasonCode,
 } from "@ordin/zkyc-sdk-reference";
 import { App } from "../src/App.js";
 import type { OnboardingClient } from "../src/scenarios.js";
@@ -65,9 +66,9 @@ function credential(input: Parameters<OnboardingClient["issueCredential"]>[0], i
 }
 
 function directDecision(
-  outcome: "ALLOW" | "DENY" | "STEP_UP",
-  reasonCode: AccessDecision["reasonCode"],
-): BoundDirectAccessDecision {
+  outcome: "ALLOW" | "STEP_UP",
+  reasonCode: TrustedBoundDirectReasonCode,
+): TrustedBoundDirectAccessDecision {
   return {
     version: 2,
     outcome,
