@@ -933,13 +933,17 @@ export class ZkycReferenceClient {
       const delegation = response.delegation;
       const expectedPolicy = await canonicalPolicy(input.policy);
       const expectedScopeHash = await computeScopeHash(input);
+      const expectedGrantorCredentialScopeHash = await computeScopeHash(input.grantorCredential);
       const expectedBindingHash = await computeDelegationBindingHash(delegation);
       requireResponseCorrelation(
+        input.grantorCredential.principalId === input.grantor.id &&
+        input.grantorCredential.principalType === input.grantor.type &&
+        sameCanonicalAffiliations(input.grantorCredential.affiliations, input.grantor.affiliations) &&
+        input.grantorCredential.scopeHash === expectedGrantorCredentialScopeHash &&
         delegation.grantorCredentialId === input.grantorCredential.id &&
         delegation.issuerId === input.grantorCredential.issuerId &&
         delegation.grantorId === input.grantor.id &&
         delegation.grantorType === input.grantor.type &&
-        sameCanonicalAffiliations(input.grantorCredential.affiliations, input.grantor.affiliations) &&
         (input.grantor.id !== input.delegate.id || input.grantor.type !== input.delegate.type) &&
         delegation.delegateId === input.delegate.id &&
         delegation.delegateType === input.delegate.type &&
