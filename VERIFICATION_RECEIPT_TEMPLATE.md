@@ -1,6 +1,6 @@
 # Exact-Tag Verification Receipt Template
 
-**Purpose:** complete this as a separate asset only after an exact v0.3 tag has been created. Do not prefill future publication events inside the tag.
+**Purpose:** complete this as a separate asset only after the exact tag named below exists. Do not prefill future publication events inside the tag.
 
 - **Repository:** `https://github.com/ordin-systems/zkyc-core`
 - **Exact tag:** `<existing tag>`
@@ -29,20 +29,22 @@ Start with the locked, script-disabled install. Record actual exit codes and res
 | `npm run package:check` |  |  |
 | `npm audit --audit-level=high` |  |  |
 
-If the environment requires it, record `npx playwright install chromium` separately as browser setup rather than as a test.
+If the environment requires it, record `npx --no-install playwright install chromium` separately as browser setup rather than as a test.
 
 ## Behavioral test inventory
 
-| Lane | Exact count | Result |
+Populate counts from the actual exact-tag execution rather than copying candidate-era values.
+
+| Lane | Actual count | Result |
 |---|---:|---|
-| Core | 46 |  |
-| API/server | 13 |  |
-| SDK | 12 |  |
-| Operator UI | 3 |  |
-| zkYA component | 9 |  |
-| Scanner regression | 9 |  |
-| Release-tooling regression | 7 |  |
-| Chromium E2E | 1 |  |
+| Core |  |  |
+| API/server |  |  |
+| SDK |  |  |
+| Operator UI |  |  |
+| zkYA component |  |  |
+| Scanner regression |  |  |
+| Release-tooling regression |  |  |
+| Chromium E2E |  |  |
 
 Do not count format, security, typecheck, build, package, or audit gates as tests.
 
@@ -56,7 +58,7 @@ List only assets that exist and were hashed after construction. The receipt itse
 
 ## Explicit stage boundary
 
-This receipt verifies the exact tag locally. It contains **no publication, GitHub immutable-state, public URL availability, logged-out download, archive readback, merge-protection, tag-CI, independent-review, or npm-publication proof**.
+This receipt verifies the exact tag locally. It contains **no publication, GitHub immutable-state, public URL availability, logged-out download, archive readback, merge-protection, tag-CI, independent external review, or npm-publication proof**.
 
 If publication later occurs, create a separate dated post-publication sidecar for GitHub API state, logged-out download, checksum, and extraction/readback evidence. Do not edit this tagged template or claim that future sidecar evidence existed inside the tag.
 

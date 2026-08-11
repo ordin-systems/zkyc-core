@@ -8,7 +8,9 @@
 
 ## Exact candidate scope
 
-The v0.3 executable baseline is `20fa75cf847e064e84f07f6426908412a5811be6`. This documentation is a forward documentation-only successor to that runtime. Neither identifier is a release tag.
+This checkout is the `v0.3.1` corrective candidate. Package manifests, lockfile workspace entries, API health response, and SDK health validation use version `0.3.1`. It is not a release tag and must be bound to an exact commit/tree by the later release process.
+
+Historical immutable `v0.3.0` remains available separately at commit `c67f16c39d67b4c56c88d06c9738d4a164d2a27e` and tree `e73f3401718d01a7e5bcca1aa84b728e7fa55ccc`.
 
 ## Clean local verification
 
@@ -39,11 +41,11 @@ That download is an environment prerequisite. It is not a passing test or releas
 
 - core: 46;
 - API/server: 13;
-- SDK: 12;
+- SDK: 223;
 - operator UI: 3;
 - zkYA component: 9;
 - scanner regression: 9;
-- release-tooling regression: 7;
+- release-tooling regression: 8;
 - Chromium E2E: 1.
 
 Formatting, security scanning, core/workspace typechecks, core/workspace builds, package proof, and dependency audit are distinct checks, not tests.
@@ -51,8 +53,9 @@ Formatting, security scanning, core/workspace typechecks, core/workspace builds,
 ## What the gates exercise
 
 - credential v2, typed principals, direct/delegated evaluation, one-hop attenuation, policy pinning, and reason-coded denial;
+- complete SDK request/response correlation for direct and delegated success/denial states without overclaiming private server facts;
 - step-up v2 human/type/capability/action/resource binding and revalidation;
-- receipt v2 signature/binding validation, authority revalidation, and replay rejection;
+- receipt v2 signature/binding validation, authority revalidation, monotonic projection, and replay rejection;
 - strict API and SDK transport/schema behavior;
 - versioned lifecycle transcripts through both API and SDK runners;
 - both React UIs through component tests;
@@ -63,6 +66,10 @@ Formatting, security scanning, core/workspace typechecks, core/workspace builds,
 Core/API/SDK transcript tests use fixed identifiers, timestamps, policies, and non-production keys with injected clocks. The Chromium smoke starts a compiled API on IPv4 loopback using an ephemeral port and a built zkYA preview server. UI-only wall-clock values are for local demonstration and do not alter the deterministic fixture evidence.
 
 No database, external model, live credential service, production secret, or public network service is required.
+
+## Automated review boundary
+
+Automated AI assistants were used off-GitHub to support implementation and perform separate specification and code-quality review passes. Their outputs are process provenance and engineering review aids, not independent external approval, external validation, or a third-party security audit.
 
 ## Later release evidence
 

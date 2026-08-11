@@ -2,57 +2,54 @@
 
 All notable changes to the bounded reference implementation are recorded here. Candidate entries are not release records.
 
-## 0.3.0 candidate — unreleased
+## 0.3.1 corrective candidate — unreleased
 
-### Added
+### Corrected
 
-- exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types bound through credential v2, decisions, step-up artifacts, and receipt v2;
-- explicit `DIRECT` and `DELEGATED` evaluation modes;
-- one-hop capability delegations binding grantor, delegate, grantor credential, policy ID/version, validity window, and attenuated capability/action/resource scope;
-- separate delegate identity and grantor credentials, with no transfer of grantor affiliations;
-- delegation issuance, revocation, evaluation, onboarding, step-up, receipt, and SDK/API contracts;
-- policy/expiry/revocation revalidation across delegated evaluation, step-up transitions, receipt consumption, and retained onboarding views;
-- human-only step-up resolution requiring the exact approver capability, `step-up:resolve` action scope, and requested resource scope;
-- authority-bound receipt v2 and step-up v2 artifacts, including acting/grantor/delegation bindings and one-time consumption;
-- strict SDK runtime validation for exact success and error schemas;
-- executable versioned full-stack lifecycle transcripts run through both API and SDK;
-- a dedicated zkYA onboarding reference UI and retained `/zkya/onboarding-views/:decisionLogId` projection;
-- v0.3 authority bindings in the existing operator UI;
-- a real local Chromium smoke test through the built zkYA UI, SDK, and loopback HTTP API;
-- current retained step-up eligibility derived from live subject, delegation, approver, expiry, revocation, and one-time-consumption state;
-- SDK request/response exact typed-subject/affiliation identity, canonical scope-hash, context-hash, exact-policy-version, policy-outcome, authority-satisfaction and decision-time validity, grantor-scope attenuation, delegation-binding, receipt-presence/expiry, resolution-intent, and requested-expiry correlation;
-- immutable startup policy registries and exact live-policy re-evaluation for evaluation, step-up, and receipt transitions;
-- fail-closed rejection of self-delegation and any reuse of the acting credential in the grantor lane;
-- strict SDK handling for legitimate unbound credential-missing denials and decision-log-correlated step-up creation;
-- clean-build, path-portable, fail-closed scanner/archive/package verification with blank-consumer imports and installed-API probing.
+- completed SDK reason-code parity and exact request correlation for direct, partially bound, and fully bound delegated denials without claiming proof of private server state;
+- preserved the earlier server-authoritative `DELEGATION_GRANTOR_CREDENTIAL_INVALID` boundary while correlating every later request-observable denial stage;
+- required fully bound delegated success and downstream denials to use retained validated delegate, delegation, and grantor snapshots with exact issuer and issuance-attenuation checks;
+- separated durable receipt `consumptionStatus` from `lastAttempt`, preserving `CONSUMED` after rejected replay or other later failures;
+- prevented malformed or unassociated receipt input from changing retained receipt projection state;
+- made SDK receipt-consumption responses discriminated and rejected impossible or legacy projection shapes;
+- reconciled current-main publication, provenance, evidence, and version wording while leaving immutable historical release trees unchanged.
 
-### Independent-review remediation state
+### Automated review provenance
 
-- the defensive review of superseded candidate `54f2c343729e9137d2cbec3468266531e885373b` returned `REQUEST_CHANGES` for step-up creation semantics and receipt-template counts;
-- the parallel specification review timed out without a verdict after independently reproducing forged SDK scope, policy-version, and policy-outcome acceptance;
-- executable baseline `20fa75cf847e064e84f07f6426908412a5811be6` remediates all reproduced findings and passes the local integrated verifier;
-- at superseded candidate `5749f77495bb075871fed0e80eff3ca89e2f9d9f`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` after proving an unsatisfied-capability forged `ALLOW`; this baseline closes that finding and adjacent affiliation/scope/decision-time/receipt/resolution correlations;
-- at superseded candidate `db759f18ff727e59e70f472b193d88cd404e61fe`, both reviewers returned `REQUEST_CHANGES` after independently proving grantor-scope escalation, and the specification reviewer additionally proved direct principal/credential affiliation substitution; this baseline mirrors core exact-subject and delegation-attenuation invariants in SDK issuance and evaluation correlation;
-- at superseded candidate `ab67604a67263af316a5dd78643435e3045809fb`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` after proving that core delegation issuance accepted caller-substituted grantor affiliations; this baseline requires exact credential-bound grantor affiliations in core and API issuance as well as SDK correlation;
-- at superseded candidate `7816c406a57eb17a85f3f275b4173550c1e725dc`, the defensive reviewer returned `PASS` and the specification reviewer returned `REQUEST_CHANGES` because Hono collapsed the correct core `DELEGATION_GRANTOR_MISMATCH` into generic `INVALID_REQUEST`; this baseline preserves the stable delegation domain code through API and SDK transport;
-- no independent `PASS` is claimed for this successor until new exact-head reviews complete.
+Automated AI assistants were used off-GitHub to support implementation and perform separate specification and code-quality review passes. Their outputs informed maintainer decisions and are process provenance only. They are not project authors, owners, external validators, or third-party security auditors, and automated review is not independent external approval. Git history remains the record of individual commit attribution.
 
-### Verification inventory at executable baseline `20fa75cf847e064e84f07f6426908412a5811be6`
+Canonical authorship remains:
+
+**Mike “Mizzy” Barrera and Monique Abrams — joint authors and co-architects.**
+
+### Current candidate verification inventory
 
 - core tests: 46;
 - API/server tests: 13;
-- SDK tests: 12;
+- SDK tests: 223;
 - operator UI tests: 3;
 - zkYA component tests: 9;
 - scanner regression tests: 9;
-- release-tooling regression tests: 7;
+- release-tooling regression tests: 8;
 - Chromium E2E tests: 1.
 
-Format, security, typecheck, build, package, and dependency-audit gates remain distinct checks and are not included as tests.
+Format, security, typecheck, build, package, and dependency-audit gates remain distinct checks and are not counted as tests.
 
 ### Candidate boundary
 
-This entry describes an integrated local reference candidate. It does not claim a merge, tag, release, publication, npm package, current-head CI result, immutable v0.3 artifact, independent review, archive hash, or logged-out public readback.
+This entry describes a local `v0.3.1` corrective candidate. It does not claim merge, protected CI, tag, release, publication, archive digest, clean-room replay, immutable-release state, or logged-out public readback. Those remain release-stage gates.
+
+## 0.3.0 — 2026-08-10
+
+### Published reference release
+
+- added exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types bound through credential v2, decisions, step-up artifacts, and receipt v2;
+- added explicit `DIRECT` and one-hop `DELEGATED` evaluation modes with distinct acting and grantor credentials;
+- added policy-pinned attenuated delegations, current authority revalidation, human-only exact-scope step-up, and authority-bound one-time receipts;
+- added Hono API, strict browser SDK, operator and zkYA UIs, versioned API/SDK transcripts, and real local Chromium coverage;
+- added fail-closed scanner/archive/package verification and blank-consumer package proof.
+
+The immutable release is preserved at commit `c67f16c39d67b4c56c88d06c9738d4a164d2a27e`, tree `e73f3401718d01a7e5bcca1aa84b728e7fa55ccc`, and [`v0.3.0`](https://github.com/ordin-systems/zkyc-core/releases/tag/v0.3.0). Later corrections land only in `v0.3.1` and do not rewrite this release.
 
 ## 0.2.1-full-stack-reference — 2026-08-09
 

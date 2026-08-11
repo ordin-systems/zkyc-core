@@ -224,7 +224,7 @@ export function App({ client = defaultClient, initialView = null }: AppProps = {
       <header className="masthead">
         <div className="masthead-meta" aria-label="Artifact identity">
           <span>ORDIN SYSTEMS</span>
-          <span>REFERENCE / v0.3.0</span>
+          <span>REFERENCE / v0.3.1</span>
           <span>LOCAL PROCESS</span>
         </div>
         <div className="hero-grid">

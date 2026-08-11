@@ -153,6 +153,7 @@ test("renders the exact title, persistent limits, accessible controls, and empty
   expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
     "zkYA / Know-Your-Agent Onboarding Reference",
   );
+  expect(within(screen.getByLabelText("Artifact identity")).getByText("REFERENCE / v0.3.1")).toBeTruthy();
   const boundary = screen.getByLabelText("Persistent reference boundary");
   expect(boundary.textContent).toContain("Not real KYC/AML");
   expect(boundary.textContent).toContain("ZK-proof verification");

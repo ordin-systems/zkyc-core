@@ -63,4 +63,4 @@ The Vite development server proxies `/api` to the local API. For the automated b
 
 ## Evidence and maturity boundary
 
-This is an integrated local reference candidate. It has not been pushed, merged, tagged, released, published, independently approved, or deployed. It establishes no production identity/KYC/AML, ZK verification, authentication, durability, protected execution, adoption, or external validation.
+This is an integrated local `v0.3.1` corrective candidate. Historical `v0.3.0` is already published and immutable; this successor is not yet merged, tagged, released, published, or deployed. It establishes no production identity/KYC/AML, ZK verification, authentication, durability, protected execution, adoption, or external validation.

@@ -2,22 +2,24 @@
 
 **Deterministic Agent Identity and Action-Authority Reference Stack**
 
-> **Status:** integrated local `v0.3.0` reference candidate. The executable baseline is commit `20fa75cf847e064e84f07f6426908412a5811be6`; this documentation-only successor does not change its runtime. This candidate has not been pushed, merged, tagged, released, published, or independently approved.
+> **Status:** integrated local `v0.3.1` corrective candidate. It is not yet merged, tagged, released, or published. Historical immutable [`v0.3.0`](https://github.com/ordin-systems/zkyc-core/releases/tag/v0.3.0) remains unchanged at commit `c67f16c39d67b4c56c88d06c9738d4a164d2a27e` and tree `e73f3401718d01a7e5bcca1aa84b728e7fa55ccc`.
 
 zKYC Core evaluates typed principals and direct or delegated authority against exact credential, action, resource, and versioned-policy scope. It returns reason-coded `ALLOW`, `DENY`, or `STEP_UP` decisions and supports one-time, authority-bound consumption.
 
-The candidate includes:
+The current candidate includes:
 
 - `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
 - scoped credential v2 records and one-hop attenuated delegation grants;
 - separate acting-subject and grantor credentials in delegated mode, with no grantor-affiliation transfer;
 - policy-pinned delegation, expiry/revocation revalidation, and human-only exact-scope step-up;
 - authority-bound HMAC-SHA256 receipt v2 verification and replay rejection;
-- Hono API, strictly runtime-validated TypeScript SDK with recomputed derived-authority correlation, operator cockpit, and zkYA onboarding reference;
+- Hono API and a strictly runtime-validated TypeScript SDK with exact request/response correlation across success and denial outcomes;
+- monotonic receipt projection with durable `consumptionStatus` separated from the latest accepted or rejected attempt;
+- operator cockpit and zkYA onboarding reference UIs;
 - executable versioned lifecycle transcripts and one real local Chromium end-to-end test;
 - clean-build, fail-closed archive/scanner/package checks with blank-consumer package proof.
 
-Historical immutable release [`v0.2.1-full-stack-reference`](https://github.com/ordin-systems/zkyc-core/releases/tag/v0.2.1-full-stack-reference) remains unchanged. The candidate does not rewrite its evidence or make `v0.3.0` a release.
+Historical releases, including [`v0.2.1-full-stack-reference`](https://github.com/ordin-systems/zkyc-core/releases/tag/v0.2.1-full-stack-reference) and `v0.3.0`, remain immutable and are not retagged or rewritten by this forward correction.
 
 ## Workspace map
 
@@ -51,7 +53,7 @@ npm audit --audit-level=high
 
 The browser test requires Playwright Chromium. If it is not already present, run `npx --no-install playwright install chromium` after `npm ci --ignore-scripts` and before `npm run test:browser`. CI uses `npx --no-install playwright install --with-deps chromium`. Browser installation is an environment prerequisite, not evidence that the test passed.
 
-Current executable test inventory for the baseline is: core 46, API/server 13, SDK 12, operator UI 3, zkYA component 9, scanner regression 9, release-tooling regression 7, and Chromium E2E 1.
+Current executable inventory for the `v0.3.1` candidate is: core 46, API/server 13, SDK 223, operator UI 3, zkYA component 9, scanner regression 9, release-tooling regression 8, and Chromium E2E 1.
 
 ## Run the local interfaces
 
@@ -93,6 +95,12 @@ Start with:
 - `CLAIMS_AND_LIMITATIONS.md`
 - `REPRODUCIBILITY.md`
 - `PROVENANCE.md`
+
+## Authorship and automated review provenance
+
+**Mike “Mizzy” Barrera and Monique Abrams — joint authors and co-architects.**
+
+Automated AI assistants were used off-GitHub to support implementation and perform separate specification and code-quality review passes. Their outputs informed maintainer decisions and are process provenance only. They are not project authors, owners, external validators, or third-party security auditors, and automated review is not independent external approval.
 
 ## Critical boundaries
 

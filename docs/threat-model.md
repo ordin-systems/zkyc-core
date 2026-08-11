@@ -48,4 +48,4 @@
 
 ## Evidence boundary
 
-Tests and Chromium smoke establish bounded local behavior. They do not establish production security, a public/immutable v0.3 release, current-head CI success, or independent review.
+Tests and Chromium smoke establish bounded local behavior. They do not establish production security, a public/immutable `v0.3.1` successor release, current-head protected CI success, or independent external review. Historical `v0.3.0` publication does not satisfy those successor gates.

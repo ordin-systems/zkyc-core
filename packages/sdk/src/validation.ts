@@ -858,13 +858,13 @@ export function validateHealthResponse(value: unknown) {
   if (
     item.ok !== true ||
     item.service !== "zkyc-core-api-reference" ||
-    item.version !== "0.3.0" ||
+    item.version !== "0.3.1" ||
     item.state !== "in-memory-reference-only"
   ) invalid();
   return {
     ok: true,
     service: "zkyc-core-api-reference",
-    version: "0.3.0",
+    version: "0.3.1",
     state: "in-memory-reference-only",
   } as const;
 }
