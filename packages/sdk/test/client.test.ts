@@ -1152,6 +1152,9 @@ function fullyBoundDelegatedDenial(
     grantorCredentialId: delegation.grantorCredentialId,
     delegationId: delegation.id,
     delegationBindingHash: delegation.delegationBindingHash,
+    ...(credential.unverifiedMetadata === undefined
+      ? {}
+      : { unverifiedMetadata: credential.unverifiedMetadata }),
   };
 }
 
@@ -1798,17 +1801,28 @@ test("SDK correlates fully bound delegated grantor and attenuation denials in co
     ).evaluate(delegatedCorrelationInput));
   });
 
-  const grantorWithoutAction = correlatedGrantorCredential({ allowedActions: [] });
+  const grantorWithoutAction = correlatedGrantorCredential({ allowedActions: ["records:other"] });
+  const grantorWithDelegatedOtherAction = correlatedGrantorCredential({
+    allowedActions: ["records:other", "records:read"],
+  });
   const delegationWithoutAction = correlatedDelegation({ allowedActions: ["records:other"] });
   const actionContradictions = [
     {
       name: "grantor credential",
-      input: { ...delegatedCorrelationInput, grantorCredential: grantorWithoutAction },
-      delegation: delegatedCorrelationDelegation,
+      input: {
+        ...delegatedCorrelationInput,
+        grantorCredential: grantorWithoutAction,
+        delegation: delegationWithoutAction,
+      },
+      delegation: delegationWithoutAction,
     },
     {
       name: "delegation",
-      input: { ...delegatedCorrelationInput, delegation: delegationWithoutAction },
+      input: {
+        ...delegatedCorrelationInput,
+        grantorCredential: grantorWithDelegatedOtherAction,
+        delegation: delegationWithoutAction,
+      },
       delegation: delegationWithoutAction,
     },
   ] as const;
@@ -1841,19 +1855,32 @@ test("SDK correlates fully bound delegated grantor and attenuation denials in co
     ).evaluate(delegatedCorrelationInput));
   });
 
-  const grantorWithoutResource = correlatedGrantorCredential({ allowedResourceIds: [] });
+  const grantorWithoutResource = correlatedGrantorCredential({
+    allowedResourceIds: ["record:other"],
+  });
+  const grantorWithDelegatedOtherResource = correlatedGrantorCredential({
+    allowedResourceIds: ["record:other", RESOURCE],
+  });
   const delegationWithoutResource = correlatedDelegation({
     allowedResourceIds: ["record:other"],
   });
   const resourceContradictions = [
     {
       name: "grantor credential",
-      input: { ...delegatedCorrelationInput, grantorCredential: grantorWithoutResource },
-      delegation: delegatedCorrelationDelegation,
+      input: {
+        ...delegatedCorrelationInput,
+        grantorCredential: grantorWithoutResource,
+        delegation: delegationWithoutResource,
+      },
+      delegation: delegationWithoutResource,
     },
     {
       name: "delegation",
-      input: { ...delegatedCorrelationInput, delegation: delegationWithoutResource },
+      input: {
+        ...delegatedCorrelationInput,
+        grantorCredential: grantorWithDelegatedOtherResource,
+        delegation: delegationWithoutResource,
+      },
       delegation: delegationWithoutResource,
     },
   ] as const;
@@ -1882,8 +1909,403 @@ test("SDK correlates fully bound delegated grantor and attenuation denials in co
   });
 });
 
+interface DelegatedFinalPolicyFixtureOptions {
+  readonly delegationCapabilities?: readonly string[];
+  readonly delegationAllowedActions?: readonly string[];
+  readonly delegationAllowedResourceIds?: readonly string[];
+  readonly delegationIssuedAt?: string;
+  readonly delegationExpiresAt?: string;
+  readonly credentialCapabilities?: readonly string[];
+  readonly credentialAffiliations?: Credential["affiliations"];
+  readonly grantorCapabilities?: readonly string[];
+  readonly grantorAllowedActions?: readonly string[];
+  readonly grantorAllowedResourceIds?: readonly string[];
+  readonly grantorIssuedAt?: string;
+  readonly grantorExpiresAt?: string;
+  readonly unverifiedMetadata?: Credential["unverifiedMetadata"];
+}
+
+function delegatedFinalPolicyFixture(
+  reasonCode: string,
+  policyInput: PolicyInput,
+  options: DelegatedFinalPolicyFixtureOptions = {},
+) {
+  const canonical = createPolicy(policyInput);
+  const affiliations = options.credentialAffiliations ?? delegatedCorrelationCredential.affiliations;
+  const credentialScope = {
+    capabilities: options.credentialCapabilities ?? delegatedCorrelationCredential.capabilities,
+    allowedActions: delegatedCorrelationCredential.allowedActions,
+    allowedResourceIds: delegatedCorrelationCredential.allowedResourceIds,
+  };
+  const credential: Credential = {
+    ...delegatedCorrelationCredential,
+    ...credentialScope,
+    affiliations,
+    scopeHash: computeScopeHash(credentialScope),
+    ...(options.unverifiedMetadata === undefined
+      ? {}
+      : { unverifiedMetadata: options.unverifiedMetadata }),
+  };
+  const delegation = correlatedDelegation({
+    policyId: canonical.id,
+    policyVersion: canonical.version,
+    capabilities: options.delegationCapabilities ?? delegatedCorrelationDelegation.capabilities,
+    allowedActions: options.delegationAllowedActions ?? delegatedCorrelationDelegation.allowedActions,
+    allowedResourceIds: options.delegationAllowedResourceIds ??
+      delegatedCorrelationDelegation.allowedResourceIds,
+    issuedAt: options.delegationIssuedAt ?? delegatedCorrelationDelegation.issuedAt,
+    expiresAt: options.delegationExpiresAt ?? delegatedCorrelationDelegation.expiresAt,
+  });
+  const grantorCredential = correlatedGrantorCredential({
+    capabilities: options.grantorCapabilities ?? staticCredential.capabilities,
+    allowedActions: options.grantorAllowedActions ?? staticCredential.allowedActions,
+    allowedResourceIds: options.grantorAllowedResourceIds ?? staticCredential.allowedResourceIds,
+    issuedAt: options.grantorIssuedAt ?? staticCredential.issuedAt,
+    expiresAt: options.grantorExpiresAt ?? staticCredential.expiresAt,
+  });
+  const decision = {
+    ...fullyBoundDelegatedDenial(reasonCode, delegation, credential),
+    policyId: canonical.id,
+    policyVersion: canonical.version,
+  };
+  const input = {
+    ...delegatedCorrelationInput,
+    principal: { ...delegatedCorrelationPrincipal, affiliations },
+    delegateIdentityCredential: credential,
+    grantorCredential,
+    delegation,
+    policy: policyInput,
+  };
+  return { decision, input };
+}
+
+test("SDK correlates fully bound delegated final policy denials in core order", async (t) => {
+  const allowRule = {
+    action: "records:read",
+    actionSensitivity: "ROUTINE" as const,
+    requiredCapabilities: ["records:read"],
+    requiredAffiliations: [] as const,
+    effect: "ALLOW" as const,
+  };
+  const finalPolicy = (id: string, rules: PolicyInput["rules"]): PolicyInput => ({ id, rules });
+  const expectAccepted = async (
+    reasonCode: string,
+    fixture: ReturnType<typeof delegatedFinalPolicyFixture>,
+  ) => {
+    const evaluated = await delegatedDenialClient(fixture.decision).evaluate(fixture.input);
+    assert.equal(evaluated.decision.reasonCode, reasonCode);
+    assert.equal(evaluated.decision.requiredApproverCapability, undefined);
+    assert.equal(evaluated.receipt, undefined);
+  };
+
+  await t.test("accepts ACTION_NOT_PERMITTED only when the exact action rule is absent", async () => {
+    const absent = delegatedFinalPolicyFixture(
+      "ACTION_NOT_PERMITTED",
+      finalPolicy("policy:delegated-final-action-absent", [{
+        ...allowRule,
+        action: "records:other",
+      }]),
+    );
+    await expectAccepted("ACTION_NOT_PERMITTED", absent);
+    for (const reasonCode of [
+      "POLICY_DENY",
+      "INSUFFICIENT_DELEGATED_CAPABILITY",
+      "AFFILIATION_REQUIRED",
+    ] as const) {
+      await expectInvalidResponse(() => delegatedDenialClient({
+        ...absent.decision,
+        reasonCode,
+      }).evaluate(absent.input));
+    }
+
+    const present = delegatedFinalPolicyFixture(
+      "ACTION_NOT_PERMITTED",
+      finalPolicy("policy:delegated-final-action-present", [allowRule]),
+    );
+    await expectInvalidResponse(() => delegatedDenialClient(present.decision).evaluate(present.input));
+  });
+
+  await t.test("preserves ROUTINE fallback sensitivity for an absent action rule", async () => {
+    const fixture = delegatedFinalPolicyFixture(
+      "ACTION_NOT_PERMITTED",
+      finalPolicy("policy:delegated-final-action-fallback", [{
+        ...allowRule,
+        action: "records:other",
+        actionSensitivity: "CRITICAL",
+      }]),
+    );
+    await expectAccepted("ACTION_NOT_PERMITTED", fixture);
+  });
+
+  await t.test("rejects every normal final reason when rule sensitivity contradicts the decision", async () => {
+    const fixture = delegatedFinalPolicyFixture(
+      "INSUFFICIENT_DELEGATED_CAPABILITY",
+      finalPolicy("policy:delegated-final-sensitive", [{
+        ...allowRule,
+        actionSensitivity: "SENSITIVE",
+        requiredCapabilities: ["records:missing"],
+      }]),
+      { delegationCapabilities: ["records:other"] },
+    );
+    await expectInvalidResponse(() => delegatedDenialClient(fixture.decision).evaluate(fixture.input));
+  });
+
+  await t.test("accepts POLICY_DENY only for an exact DENY rule", async () => {
+    const deny = delegatedFinalPolicyFixture(
+      "POLICY_DENY",
+      finalPolicy("policy:delegated-final-deny", [{ ...allowRule, effect: "DENY" }]),
+    );
+    await expectAccepted("POLICY_DENY", deny);
+
+    const allow = delegatedFinalPolicyFixture(
+      "POLICY_DENY",
+      finalPolicy("policy:delegated-final-false-deny", [allowRule]),
+    );
+    await expectInvalidResponse(() => delegatedDenialClient(allow.decision).evaluate(allow.input));
+  });
+
+  await t.test("blocks every later reason after an exact DENY rule", async () => {
+    for (const reasonCode of [
+      "INSUFFICIENT_DELEGATED_CAPABILITY",
+      "AFFILIATION_REQUIRED",
+    ] as const) {
+      const fixture = delegatedFinalPolicyFixture(
+        reasonCode,
+        finalPolicy(`policy:delegated-final-deny-blocks-${reasonCode.toLowerCase()}`, [{
+          ...allowRule,
+          effect: "DENY",
+          requiredCapabilities: ["records:missing"],
+          requiredAffiliations: [{ organizationId: "organization:missing", role: "member" }],
+        }]),
+        { delegationCapabilities: ["records:other"] },
+      );
+      await expectInvalidResponse(() => delegatedDenialClient(fixture.decision).evaluate(fixture.input));
+    }
+  });
+
+  await t.test("rejects terminal denials for impossible delegation issuance attenuation", async () => {
+    const contradictions: readonly {
+      readonly name: string;
+      readonly options: DelegatedFinalPolicyFixtureOptions;
+    }[] = [
+      {
+        name: "capability escalation",
+        options: {
+          delegationCapabilities: ["records:extra", "records:read"],
+          grantorCapabilities: ["records:read"],
+        },
+      },
+      {
+        name: "action escalation",
+        options: {
+          delegationAllowedActions: ["records:other", "records:read"],
+          grantorAllowedActions: ["records:read"],
+        },
+      },
+      {
+        name: "resource escalation",
+        options: {
+          delegationAllowedResourceIds: ["record:other", RESOURCE],
+          grantorAllowedResourceIds: [RESOURCE],
+        },
+      },
+      {
+        name: "redelegation capability",
+        options: {
+          delegationCapabilities: ["delegation:issue", "records:read"],
+          grantorCapabilities: ["delegation:issue", "records:read"],
+        },
+      },
+      {
+        name: "delegation predates grantor authority",
+        options: {
+          delegationIssuedAt: "2026-05-31T23:59:00.000Z",
+          grantorIssuedAt: START,
+        },
+      },
+      {
+        name: "delegation outlives grantor authority",
+        options: {
+          delegationExpiresAt: EXPIRY,
+          grantorExpiresAt: ARTIFACT_EXPIRY,
+        },
+      },
+    ];
+    for (const contradiction of contradictions) {
+      const fixture = delegatedFinalPolicyFixture(
+        "POLICY_DENY",
+        finalPolicy(`policy:delegated-final-attenuation-${contradiction.name.replaceAll(" ", "-")}`, [{
+          ...allowRule,
+          effect: "DENY",
+        }]),
+        contradiction.options,
+      );
+      await expectInvalidResponse(() => delegatedDenialClient(fixture.decision).evaluate(fixture.input));
+    }
+  });
+
+  await t.test("uses only delegated capabilities for one or multiple missing requirements", async () => {
+    for (const requiredCapabilities of [
+      ["records:read", "records:write"],
+      ["records:delete", "records:read", "records:write"],
+    ] as const) {
+      const fixture = delegatedFinalPolicyFixture(
+        "INSUFFICIENT_DELEGATED_CAPABILITY",
+        finalPolicy(`policy:delegated-final-caps-${requiredCapabilities.length}`, [{
+          ...allowRule,
+          requiredCapabilities,
+        }]),
+        {
+          delegationCapabilities: ["records:read"],
+          credentialCapabilities: [...requiredCapabilities, "identity:act"].sort(),
+          grantorCapabilities: [...requiredCapabilities].sort(),
+        },
+      );
+      await expectAccepted("INSUFFICIENT_DELEGATED_CAPABILITY", fixture);
+    }
+  });
+
+  await t.test("rejects false capability denial when delegation satisfies all requirements", async () => {
+    const fixture = delegatedFinalPolicyFixture(
+      "INSUFFICIENT_DELEGATED_CAPABILITY",
+      finalPolicy("policy:delegated-final-caps-satisfied", [{
+        ...allowRule,
+        requiredCapabilities: ["records:read", "records:write"],
+      }]),
+      {
+        delegationCapabilities: ["records:read", "records:write"],
+        grantorCapabilities: ["records:read", "records:write"],
+      },
+    );
+    await expectInvalidResponse(() => delegatedDenialClient(fixture.decision).evaluate(fixture.input));
+  });
+
+  await t.test("blocks affiliation denial while a delegated capability is missing", async () => {
+    const fixture = delegatedFinalPolicyFixture(
+      "AFFILIATION_REQUIRED",
+      finalPolicy("policy:delegated-final-cap-before-affiliation", [{
+        ...allowRule,
+        requiredCapabilities: ["records:missing"],
+        requiredAffiliations: [{ organizationId: "organization:required", role: "member" }],
+      }]),
+      { delegationCapabilities: ["records:other"], credentialAffiliations: [] },
+    );
+    await expectInvalidResponse(() => delegatedDenialClient(fixture.decision).evaluate(fixture.input));
+  });
+
+  await t.test("accepts affiliation denial for missing organization, role, or one of multiple tuples", async () => {
+    const cases = [
+      {
+        name: "organization",
+        held: [{ organizationId: "organization:held", role: "member" }],
+        required: [{ organizationId: "organization:missing", role: "member" }],
+      },
+      {
+        name: "role",
+        held: [{ organizationId: "organization:held", role: "member" }],
+        required: [{ organizationId: "organization:held", role: "admin" }],
+      },
+      {
+        name: "one-of-multiple",
+        held: [{ organizationId: "organization:a", role: "member" }],
+        required: [
+          { organizationId: "organization:a", role: "member" },
+          { organizationId: "organization:b", role: "reviewer" },
+        ],
+      },
+    ] as const;
+    for (const control of cases) {
+      const fixture = delegatedFinalPolicyFixture(
+        "AFFILIATION_REQUIRED",
+        finalPolicy(`policy:delegated-final-affiliation-${control.name}`, [{
+          ...allowRule,
+          requiredAffiliations: control.required,
+        }]),
+        { credentialAffiliations: control.held },
+      );
+      await expectAccepted("AFFILIATION_REQUIRED", fixture);
+    }
+  });
+
+  await t.test("rejects false affiliation denial when exact canonical tuples satisfy in any policy order", async () => {
+    const held = [
+      { organizationId: "organization:a", role: "member" },
+      { organizationId: "organization:b", role: "reviewer" },
+    ] as const;
+    const fixture = delegatedFinalPolicyFixture(
+      "AFFILIATION_REQUIRED",
+      finalPolicy("policy:delegated-final-affiliation-satisfied", [{
+        ...allowRule,
+        requiredAffiliations: [...held].reverse(),
+      }]),
+      { credentialAffiliations: held },
+    );
+    await expectInvalidResponse(() => delegatedDenialClient(fixture.decision).evaluate(fixture.input));
+  });
+
+  await t.test("rejects downstream final denials after ALLOW or STEP_UP prerequisites satisfy", async () => {
+    for (const effect of ["ALLOW", "STEP_UP"] as const) {
+      for (const reasonCode of [
+        "INSUFFICIENT_DELEGATED_CAPABILITY",
+        "AFFILIATION_REQUIRED",
+      ] as const) {
+        const fixture = delegatedFinalPolicyFixture(
+          reasonCode,
+          finalPolicy(`policy:delegated-final-${effect.toLowerCase()}-${reasonCode.toLowerCase()}`, [{
+            ...allowRule,
+            effect,
+            ...(effect === "STEP_UP"
+              ? { actionSensitivity: "SENSITIVE" as const, approverCapability: "approval:records" }
+              : {}),
+          }]),
+        );
+        const decision = effect === "STEP_UP"
+          ? { ...fixture.decision, actionSensitivity: "SENSITIVE" as const }
+          : fixture.decision;
+        await expectInvalidResponse(() => delegatedDenialClient(decision).evaluate(fixture.input));
+      }
+    }
+  });
+
+  await t.test("rejects forged requiredApproverCapability on DENY at the runtime-schema boundary", async () => {
+    const fixture = delegatedFinalPolicyFixture(
+      "POLICY_DENY",
+      finalPolicy("policy:delegated-final-forged-approver", [{ ...allowRule, effect: "DENY" }]),
+    );
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...fixture.decision,
+      requiredApproverCapability: "approval:forged",
+    }).evaluate(fixture.input));
+  });
+
+  await t.test("accepts exact credential metadata and rejects an altered contextual proof ID", async () => {
+    const metadata = {
+      zkPassProofId: "proof:zkpass:delegated-final",
+      contextualProofIds: ["proof:context:a", "proof:context:b"],
+    } as const;
+    const fixture = delegatedFinalPolicyFixture(
+      "POLICY_DENY",
+      finalPolicy("policy:delegated-final-metadata", [{ ...allowRule, effect: "DENY" }]),
+      { unverifiedMetadata: metadata },
+    );
+    await expectAccepted("POLICY_DENY", fixture);
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...fixture.decision,
+      unverifiedMetadata: {
+        ...metadata,
+        contextualProofIds: ["proof:context:a", "proof:context:altered"],
+      },
+    }).evaluate(fixture.input));
+  });
+});
+
 test("SDK preserves a validated grantor credential snapshot for later fully bound denials", async () => {
-  const grantorWithoutResource = correlatedGrantorCredential({ allowedResourceIds: [] });
+  const grantorWithoutResource = correlatedGrantorCredential({
+    allowedResourceIds: ["record:other"],
+  });
+  const delegationWithoutResource = correlatedDelegation({
+    allowedResourceIds: ["record:other"],
+  });
   let actionReads = 0;
   const accessorGrantorCredential = {
     ...grantorWithoutResource,
@@ -1893,10 +2315,11 @@ test("SDK preserves a validated grantor credential snapshot for later fully boun
     },
   } as Credential;
   const evaluated = await delegatedDenialClient(
-    fullyBoundDelegatedDenial("RESOURCE_OUTSIDE_DELEGATION_SCOPE"),
+    fullyBoundDelegatedDenial("RESOURCE_OUTSIDE_DELEGATION_SCOPE", delegationWithoutResource),
   ).evaluate({
     ...delegatedCorrelationInput,
     grantorCredential: accessorGrantorCredential,
+    delegation: delegationWithoutResource,
   });
 
   assert.equal(evaluated.decision.reasonCode, "RESOURCE_OUTSIDE_DELEGATION_SCOPE");

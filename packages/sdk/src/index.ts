@@ -730,6 +730,18 @@ function containsAllAffiliations(
   return required.every(({ organizationId, role }) => available.has(`${organizationId}\u0000${role}`));
 }
 
+function delegationAttenuatesGrantor(
+  delegation: CapabilityDelegation,
+  grantorCredential: Credential,
+): boolean {
+  return Date.parse(delegation.issuedAt) >= Date.parse(grantorCredential.issuedAt) &&
+    Date.parse(delegation.expiresAt) <= Date.parse(grantorCredential.expiresAt) &&
+    !delegation.capabilities.includes("delegation:issue") &&
+    containsAll(grantorCredential.capabilities, delegation.capabilities) &&
+    containsAll(grantorCredential.allowedActions, delegation.allowedActions) &&
+    containsAll(grantorCredential.allowedResourceIds, delegation.allowedResourceIds);
+}
+
 function activeAt(
   artifact: { readonly issuedAt: string; readonly expiresAt: string },
   at: string,
@@ -934,7 +946,7 @@ function fullyBoundDelegatedDenialMatchesRequest(
     grantorCredential.principalId === delegation.grantorId &&
     grantorCredential.principalType === delegation.grantorType;
   if (decision.reasonCode === "DELEGATION_GRANTOR_MISMATCH") return !grantorTupleMatches;
-  if (!grantorTupleMatches) return false;
+  if (!grantorTupleMatches || !delegationAttenuatesGrantor(delegation, grantorCredential)) return false;
 
   const actionInScope = grantorCredential.allowedActions.includes(input.action) &&
     delegation.allowedActions.includes(input.action);
@@ -945,7 +957,31 @@ function fullyBoundDelegatedDenialMatchesRequest(
     delegation.allowedResourceIds.includes(input.resourceId);
   if (decision.reasonCode === "RESOURCE_OUTSIDE_DELEGATION_SCOPE") return !resourceInScope;
   if (!resourceInScope) return false;
-  return true;
+
+  if (decision.requiredApproverCapability !== undefined) return false;
+  const rule = expectedPolicy.rules.find((candidate) => candidate.action === decision.action);
+  if (rule === undefined) return decision.reasonCode === "ACTION_NOT_PERMITTED";
+  if (rule.actionSensitivity !== decision.actionSensitivity) return false;
+  if (rule.effect === "DENY") return decision.reasonCode === "POLICY_DENY";
+  if (decision.reasonCode === "POLICY_DENY") return false;
+
+  const delegatedCapabilitiesSatisfyRule = containsAll(
+    delegation.capabilities,
+    rule.requiredCapabilities,
+  );
+  if (decision.reasonCode === "INSUFFICIENT_DELEGATED_CAPABILITY") {
+    return !delegatedCapabilitiesSatisfyRule;
+  }
+  if (!delegatedCapabilitiesSatisfyRule) return false;
+
+  const actingAffiliationsSatisfyRule = containsAllAffiliations(
+    credential.affiliations,
+    rule.requiredAffiliations,
+  );
+  if (decision.reasonCode === "AFFILIATION_REQUIRED") {
+    return !actingAffiliationsSatisfyRule;
+  }
+  return false;
 }
 
 function directDenialMatchesRequest(
@@ -1047,11 +1083,10 @@ function decisionMatchesRequestedPolicy(
       directDenialMatchesRequest(decision, rule, input, directCredentialState);
   }
   if (decision.grantorId !== undefined) {
-    if (
-      delegatedCredentialState === undefined ||
-      grantorCredentialState === undefined ||
-      delegationState === undefined ||
-      !fullyBoundDelegatedDenialMatchesRequest(
+    return delegatedCredentialState !== undefined &&
+      grantorCredentialState !== undefined &&
+      delegationState !== undefined &&
+      fullyBoundDelegatedDenialMatchesRequest(
         decision,
         input,
         delegatedCredentialState,
@@ -1059,11 +1094,7 @@ function decisionMatchesRequestedPolicy(
         delegationState,
         grantorCredentialId,
         policy,
-      )
-    ) return false;
-    if (decision.reasonCode === "POLICY_DENY") return rule?.effect === "DENY";
-    if (decision.reasonCode === "ACTION_NOT_PERMITTED") return rule === undefined;
-    return decision.requiredApproverCapability === undefined;
+      );
   }
   return delegatedCredentialState !== undefined &&
     delegationState !== undefined &&
