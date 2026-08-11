@@ -6,6 +6,7 @@ import {
   computeScopeHash,
   createPolicy,
   sha256Version,
+  type ReceiptVerificationCode as CoreReceiptVerificationCode,
 } from "@ordin/zkyc-core-reference";
 import {
   ZkycApiError,
@@ -23,6 +24,7 @@ import {
   type PolicyInput,
   type Principal,
   type ReceiptExpectedBinding,
+  type ReceiptVerificationCode as SdkReceiptVerificationCode,
   type StepUpAuthorization,
 } from "../src/index.js";
 
@@ -35,6 +37,32 @@ const RESOURCE = "record:sdk-reference";
 const HMAC_KEY = new TextEncoder().encode("0123456789abcdef0123456789abcdef");
 const HASH_0 = `sha256:${"0".repeat(64)}`;
 const HASH_1 = `sha256:${"1".repeat(64)}`;
+
+type EqualTypes<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends
+    (<Value>() => Value extends Right ? 1 : 2)
+    ? (<Value>() => Value extends Right ? 1 : 2) extends
+        (<Value>() => Value extends Left ? 1 : 2)
+      ? true
+      : false
+    : false;
+type AssertType<Value extends true> = Value;
+type ReceiptVerificationCodeParity = AssertType<
+  EqualTypes<CoreReceiptVerificationCode, SdkReceiptVerificationCode>
+>;
+const receiptVerificationCodeParity: ReceiptVerificationCodeParity = true;
+const RECEIPT_VERIFICATION_CODES = {
+  RECEIPT_VALID: true,
+  RECEIPT_MALFORMED: true,
+  RECEIPT_SIGNATURE_INVALID: true,
+  RECEIPT_NOT_YET_VALID: true,
+  RECEIPT_EXPIRED: true,
+  RECEIPT_BINDING_MISMATCH: true,
+  RECEIPT_NOT_AUTHORIZING: true,
+  RECEIPT_CREDENTIAL_INVALID: true,
+  RECEIPT_AUTHORITY_INVALID: true,
+  RECEIPT_REPLAYED: true,
+} as const satisfies Record<CoreReceiptVerificationCode, true>;
 
 function jsonResponse(body: unknown, status = 200, contentType = "application/json"): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": contentType } });
@@ -213,24 +241,72 @@ test("SDK executes the direct v0.3 lifecycle through the real Hono adapter", asy
   assert.equal(evaluated.decision.outcome, "ALLOW");
   assert.equal(evaluated.decision.authorityMode, "DIRECT");
   assert.ok(evaluated.receipt);
-  assert.equal(evaluated.receipt.payload.version, 2);
+  const evaluatedReceipt = evaluated.receipt;
+  assert.equal(evaluatedReceipt.payload.version, 2);
 
   const initial = await client.getOnboardingView(evaluated.logId);
   assert.equal(initial.verificationStatus, "ACTIVE");
   assert.equal(initial.authorityMode, "DIRECT");
   assert.equal(initial.delegatedScope, null);
-  assert.equal(initial.receipt.status, "UNCONSUMED");
+  assert.deepEqual(initial.receipt, {
+    consumptionStatus: "UNCONSUMED",
+    lastAttempt: { outcome: "NONE" },
+  });
 
   const expected = receiptExpected(evaluated.decision);
+  assert.deepEqual(await client.consumeReceipt({
+    receipt: evaluated.receipt,
+    expected: { ...expected, resourceId: "record:wrong-binding" },
+  }), {
+    valid: false,
+    reasonCode: "RECEIPT_BINDING_MISMATCH",
+  });
+  assert.deepEqual((await client.getOnboardingView(evaluated.logId)).receipt, {
+    consumptionStatus: "UNCONSUMED",
+    lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_BINDING_MISMATCH" },
+  });
   assert.deepEqual(await client.consumeReceipt({ receipt: evaluated.receipt, expected }), {
     valid: true,
     reasonCode: "RECEIPT_VALID",
+  });
+  assert.deepEqual((await client.getOnboardingView(evaluated.logId)).receipt, {
+    consumptionStatus: "CONSUMED",
+    lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_VALID" },
   });
   assert.deepEqual(await client.consumeReceipt({ receipt: evaluated.receipt, expected }), {
     valid: false,
     reasonCode: "RECEIPT_REPLAYED",
   });
-  assert.equal((await client.getOnboardingView(evaluated.logId)).receipt.status, "CONSUMED");
+  assert.deepEqual((await client.getOnboardingView(evaluated.logId)).receipt, {
+    consumptionStatus: "CONSUMED",
+    lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_REPLAYED" },
+  });
+
+  for (const response of [
+    { valid: true, reasonCode: "RECEIPT_REPLAYED" },
+    { valid: false, reasonCode: "RECEIPT_VALID" },
+  ]) {
+    const contradictoryClient = new ZkycReferenceClient({
+      baseUrl: "https://receipt-verification.reference",
+      fetch: () => Promise.resolve(jsonResponse(response)),
+    });
+    await expectInvalidResponse(() => contradictoryClient.consumeReceipt({
+      receipt: evaluatedReceipt,
+      expected,
+    }));
+  }
+  assert.equal(receiptVerificationCodeParity, true);
+  for (const reasonCode of Object.keys(RECEIPT_VERIFICATION_CODES) as CoreReceiptVerificationCode[]) {
+    const valid = reasonCode === "RECEIPT_VALID";
+    const parityClient = new ZkycReferenceClient({
+      baseUrl: "https://receipt-code-parity.reference",
+      fetch: () => Promise.resolve(jsonResponse({ valid, reasonCode })),
+    });
+    assert.deepEqual(await parityClient.consumeReceipt({ receipt: evaluatedReceipt, expected }), {
+      valid,
+      reasonCode,
+    });
+  }
 
   const log = await client.getDecisionLog();
   assert.equal(log.referenceOnly, true);
@@ -248,6 +324,9 @@ test("SDK executes the direct v0.3 lifecycle through the real Hono adapter", asy
     ["POST", "/evaluations"],
     ["GET", `/zkya/onboarding-views/${encodeURIComponent(evaluated.logId)}`],
     ["POST", "/receipts/consume"],
+    ["GET", `/zkya/onboarding-views/${encodeURIComponent(evaluated.logId)}`],
+    ["POST", "/receipts/consume"],
+    ["GET", `/zkya/onboarding-views/${encodeURIComponent(evaluated.logId)}`],
     ["POST", "/receipts/consume"],
     ["GET", `/zkya/onboarding-views/${encodeURIComponent(evaluated.logId)}`],
     ["GET", "/decision-log"],
@@ -908,7 +987,7 @@ const staticView: OnboardingView = {
     reasonCode: "POLICY_ALLOW",
   }],
   requiredApproval: { status: "NOT_REQUIRED" },
-  receipt: { status: "NOT_ISSUED" },
+  receipt: { consumptionStatus: "NOT_ISSUED", lastAttempt: { outcome: "NONE" } },
   policyId: staticDecision.policyId,
   policyVersion: staticDecision.policyVersion,
 };
@@ -3243,7 +3322,7 @@ test("SDK rejects v0.3 successful responses with missing, unknown, or mixed auth
       reasonCode: "POLICY_ALLOW",
     }],
     requiredApproval: { status: "NOT_REQUIRED" },
-    receipt: { status: "NOT_ISSUED" },
+    receipt: { consumptionStatus: "NOT_ISSUED", lastAttempt: { outcome: "NONE" } },
     policyId: staticDecision.policyId,
     policyVersion: staticDecision.policyVersion,
   };
@@ -3304,6 +3383,60 @@ test("SDK rejects v0.3 successful responses with missing, unknown, or mixed auth
     fetch: () => Promise.resolve(jsonResponse(missingPrincipalLog)),
   });
   await expectInvalidResponse(() => logClient.getDecisionLog());
+});
+
+test("SDK accepts every legal receipt projection and rejects illegal or inexact projections", async () => {
+  const legalReceipts = [
+    { consumptionStatus: "NOT_ISSUED", lastAttempt: { outcome: "NONE" } },
+    { consumptionStatus: "UNCONSUMED", lastAttempt: { outcome: "NONE" } },
+    {
+      consumptionStatus: "UNCONSUMED",
+      lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_BINDING_MISMATCH" },
+    },
+    {
+      consumptionStatus: "CONSUMED",
+      lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_VALID" },
+    },
+    {
+      consumptionStatus: "CONSUMED",
+      lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_REPLAYED" },
+    },
+  ] as const;
+  for (const receipt of legalReceipts) {
+    const client = new ZkycReferenceClient({
+      baseUrl: "https://receipt-projection.reference",
+      fetch: () => Promise.resolve(jsonResponse({ ...staticView, receipt })),
+    });
+    assert.deepEqual((await client.getOnboardingView(staticView.decisionLogId)).receipt, receipt);
+  }
+
+  const illegalReceipts: readonly unknown[] = [
+    { status: "REJECTED" },
+    { consumptionStatus: "NOT_ISSUED", lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_MALFORMED" } },
+    { consumptionStatus: "NOT_ISSUED", lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_VALID" } },
+    { consumptionStatus: "UNCONSUMED", lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_VALID" } },
+    { consumptionStatus: "CONSUMED", lastAttempt: { outcome: "NONE" } },
+    { consumptionStatus: "UNCONSUMED", lastAttempt: { outcome: "NONE", reasonCode: "RECEIPT_MALFORMED" } },
+    { consumptionStatus: "UNCONSUMED", lastAttempt: { outcome: "REJECTED" } },
+    { consumptionStatus: "CONSUMED", lastAttempt: { outcome: "ACCEPTED" } },
+    { consumptionStatus: "UNCONSUMED", lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_UNKNOWN" } },
+    { consumptionStatus: "UNCONSUMED", lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_MALFORMED" } },
+    { consumptionStatus: "CONSUMED", lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_MALFORMED" } },
+    { consumptionStatus: "CONSUMED", lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_REPLAYED" } },
+    { consumptionStatus: "CONSUMED", lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_VALID" } },
+    { consumptionStatus: "UNKNOWN", lastAttempt: { outcome: "NONE" } },
+    { consumptionStatus: "NOT_ISSUED" },
+    { lastAttempt: { outcome: "NONE" } },
+    { consumptionStatus: "NOT_ISSUED", lastAttempt: { outcome: "NONE" }, extra: true },
+    { consumptionStatus: "NOT_ISSUED", lastAttempt: { outcome: "NONE", extra: true } },
+  ];
+  for (const receipt of illegalReceipts) {
+    const client = new ZkycReferenceClient({
+      baseUrl: "https://receipt-projection.reference",
+      fetch: () => Promise.resolve(jsonResponse({ ...staticView, receipt })),
+    });
+    await expectInvalidResponse(() => client.getOnboardingView(staticView.decisionLogId));
+  }
 });
 
 test("SDK preserves strict JSON media types, error envelopes, network errors, and encoded parameters", async () => {

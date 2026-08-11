@@ -7,6 +7,7 @@ import {
   type CapabilityDelegation,
   type Credential,
   type ReceiptExpectedBinding,
+  type ReceiptVerificationCode,
   type SignedReceipt,
   type StepUpAuthorization,
 } from "@ordin/zkyc-core-reference";
@@ -22,6 +23,14 @@ const RESOURCE = "record:customer-7";
 const MEMBER = { organizationId: "organization:fixture", role: "member" } as const;
 
 type JsonRecord = Record<string, unknown>;
+
+type ReceiptLastAttempt =
+  | { readonly outcome: "NONE" }
+  | { readonly outcome: "ACCEPTED"; readonly reasonCode: "RECEIPT_VALID" }
+  | {
+    readonly outcome: "REJECTED";
+    readonly reasonCode: Exclude<ReceiptVerificationCode, "RECEIPT_VALID">;
+  };
 
 interface OnboardingView {
   readonly version: 1;
@@ -54,7 +63,8 @@ interface OnboardingView {
     readonly requestId?: string;
   };
   readonly receipt: {
-    readonly status: "NOT_ISSUED" | "UNCONSUMED" | "CONSUMED" | "REJECTED";
+    readonly consumptionStatus: "NOT_ISSUED" | "UNCONSUMED" | "CONSUMED";
+    readonly lastAttempt: ReceiptLastAttempt;
   };
   readonly policyId: string;
   readonly policyVersion: string;
@@ -417,7 +427,45 @@ test("health and direct v2 authority lifecycle expose a deterministic onboarding
     reasonCode: "POLICY_ALLOW",
   }]);
   assert.deepEqual(initial.requiredApproval, { status: "NOT_REQUIRED" });
-  assert.deepEqual(initial.receipt, { status: "UNCONSUMED" });
+  assert.deepEqual(initial.receipt, {
+    consumptionStatus: "UNCONSUMED",
+    lastAttempt: { outcome: "NONE" },
+  });
+
+  const unassociated = await requestJson(app, "/receipts/consume", {
+    method: "POST",
+    body: {
+      receipt: {
+        ...output.receipt,
+        signature: `${output.receipt.signature[0] === "A" ? "B" : "A"}${output.receipt.signature.slice(1)}`,
+      },
+      expected: receiptExpectedBinding(output.decision),
+    },
+  });
+  assert.deepEqual(unassociated.body, {
+    valid: false,
+    reasonCode: "RECEIPT_SIGNATURE_INVALID",
+  });
+  assert.deepEqual((await onboarding(app, output.logId)).receipt, {
+    consumptionStatus: "UNCONSUMED",
+    lastAttempt: { outcome: "NONE" },
+  });
+
+  const malformedAssociated = await requestJson(app, "/receipts/consume", {
+    method: "POST",
+    body: {
+      receipt: { ...output.receipt, unsupported: true },
+      expected: receiptExpectedBinding(output.decision),
+    },
+  });
+  assert.deepEqual(malformedAssociated.body, {
+    valid: false,
+    reasonCode: "RECEIPT_MALFORMED",
+  });
+  assert.deepEqual((await onboarding(app, output.logId)).receipt, {
+    consumptionStatus: "UNCONSUMED",
+    lastAttempt: { outcome: "NONE" },
+  });
 
   const expected = receiptExpectedBinding(output.decision);
   const rejected = await requestJson(app, "/receipts/consume", {
@@ -425,21 +473,30 @@ test("health and direct v2 authority lifecycle expose a deterministic onboarding
     body: { receipt: output.receipt, expected: { ...expected, resourceId: "record:other" } },
   });
   assert.deepEqual(rejected.body, { valid: false, reasonCode: "RECEIPT_BINDING_MISMATCH" });
-  assert.deepEqual((await onboarding(app, output.logId)).receipt, { status: "REJECTED" });
+  assert.deepEqual((await onboarding(app, output.logId)).receipt, {
+    consumptionStatus: "UNCONSUMED",
+    lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_BINDING_MISMATCH" },
+  });
 
   const consumed = await requestJson(app, "/receipts/consume", {
     method: "POST",
     body: { receipt: output.receipt, expected },
   });
   assert.deepEqual(consumed.body, { valid: true, reasonCode: "RECEIPT_VALID" });
-  assert.deepEqual((await onboarding(app, output.logId)).receipt, { status: "CONSUMED" });
+  assert.deepEqual((await onboarding(app, output.logId)).receipt, {
+    consumptionStatus: "CONSUMED",
+    lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_VALID" },
+  });
 
   const replay = await requestJson(app, "/receipts/consume", {
     method: "POST",
     body: { receipt: output.receipt, expected },
   });
   assert.deepEqual(replay.body, { valid: false, reasonCode: "RECEIPT_REPLAYED" });
-  assert.deepEqual((await onboarding(app, output.logId)).receipt, { status: "CONSUMED" });
+  assert.deepEqual((await onboarding(app, output.logId)).receipt, {
+    consumptionStatus: "CONSUMED",
+    lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_REPLAYED" },
+  });
 });
 
 test("direct onboarding refresh reflects credential revocation and expiry", async () => {
@@ -447,6 +504,10 @@ test("direct onboarding refresh reflects credential revocation and expiry", asyn
   const credential = await issueCredential(revokedHarness.app);
   const evaluated = await evaluateDirect(revokedHarness.app, credential, { issueReceipt: false });
   const logId = (evaluated.body as { logId: string }).logId;
+  assert.deepEqual((await onboarding(revokedHarness.app, logId)).receipt, {
+    consumptionStatus: "NOT_ISSUED",
+    lastAttempt: { outcome: "NONE" },
+  });
   const revocation = await requestJson(
     revokedHarness.app,
     `/credentials/${encodeURIComponent(credential.id)}/revoke`,
@@ -546,7 +607,10 @@ test("delegation issuance, delegated receipt consumption, and revocation stay au
     },
   });
   assert.deepEqual(consumed.body, { valid: true, reasonCode: "RECEIPT_VALID" });
-  assert.equal((await onboarding(app, output.logId)).receipt.status, "CONSUMED");
+  assert.deepEqual((await onboarding(app, output.logId)).receipt, {
+    consumptionStatus: "CONSUMED",
+    lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_VALID" },
+  });
 
   setNow(LATER);
   const revoked = await requestJson(
@@ -560,7 +624,10 @@ test("delegation issuance, delegated receipt consumption, and revocation stay au
   assert.equal(refreshed.delegatedScope?.status, "REVOKED");
   assert.equal(refreshed.eligibleActions[0]?.status, "INELIGIBLE");
   assert.equal(refreshed.eligibleActions[0]?.reasonCode, "DELEGATION_REVOKED");
-  assert.equal(refreshed.receipt.status, "CONSUMED");
+  assert.deepEqual(refreshed.receipt, {
+    consumptionStatus: "CONSUMED",
+    lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_VALID" },
+  });
 });
 
 test("delegated onboarding refresh reflects delegation expiry", async () => {

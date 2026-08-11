@@ -221,7 +221,7 @@ function referenceClient(): ReferenceClientState {
       return { ok: true, authorization };
     },
     consumeStepUpAuthorization: async () => ({ authorized: ++stepConsumeCount === 1 }),
-    consumeReceipt: async () => ({ valid: true, reasonCode: "RECEIPT_CONSUMED" }),
+    consumeReceipt: async () => ({ valid: true, reasonCode: "RECEIPT_VALID" }),
     getDecisionLog: async () => ({ referenceOnly: true, entries: [] }),
   };
   return { client, delegatedCalls };
@@ -244,7 +244,7 @@ test("cockpit renders v0.3 direct scope and drives receipt plus one-time step-up
   expect(screen.getByText("DIRECT")).toBeTruthy();
   expect(screen.getByLabelText("Bound authority scope").textContent).toContain("record:reference-7");
   await user.click(screen.getByRole("button", { name: "Verify and consume once" }));
-  expect(await screen.findByText("RECEIPT_CONSUMED")).toBeTruthy();
+  expect(await screen.findByText("RECEIPT_VALID")).toBeTruthy();
 
   await user.click(screen.getByRole("radio", { name: /Sensitive export/ }));
   await user.click(screen.getByRole("button", { name: "Evaluate authority" }));

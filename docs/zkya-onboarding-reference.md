@@ -20,7 +20,9 @@ The versioned view presents:
 - delegated grantor ID/type, delegation ID, exact capabilities/actions/resources, and current delegated-scope status;
 - exact action/resource eligibility and reason code;
 - required approval state: `NOT_REQUIRED`, `PENDING`, `APPROVED`, `REJECTED`, or `EXPIRED`;
-- receipt state: `NOT_ISSUED`, `UNCONSUMED`, `CONSUMED`, or `REJECTED`;
+- receipt projection on two independent axes:
+  - durable `consumptionStatus`: `NOT_ISSUED`, `UNCONSUMED`, or `CONSUMED`;
+  - `lastAttempt`: `NONE`, `ACCEPTED / RECEIPT_VALID`, or `REJECTED` with the exact associated non-malformed receipt failure;
 - exact policy ID and version.
 
 The projection rechecks retained credential, grantor, delegation, expiry, and revocation state when read. It is a current in-process view, not a durable credential or audit ledger.
@@ -29,7 +31,7 @@ The projection rechecks retained credential, grantor, delegation, expiry, and re
 
 The candidate UI covers direct allow and receipt replay, delegated organization scope, human step-up approval/rejection, credential action/resource mismatch, and revoked delegation paths. It shows the full effective scope without treating grantor affiliations as delegate affiliations.
 
-Receipt consumption submits the complete v2 authority binding. A successful first consume changes the retained view to `CONSUMED`; replay returns `RECEIPT_REPLAYED`. Human resolution uses a separate registered `HUMAN` approver credential with the required capability and exact step-up action/resource scope.
+Receipt consumption submits the complete v2 authority binding. A successful first consume changes durable `consumptionStatus` to `CONSUMED` and records `ACCEPTED / RECEIPT_VALID`. Replay returns `RECEIPT_REPLAYED`; durable consumption remains `CONSUMED` while `lastAttempt` becomes `REJECTED / RECEIPT_REPLAYED`. Malformed or unassociated receipt input does not alter either retained projection axis. Human resolution uses a separate registered `HUMAN` approver credential with the required capability and exact step-up action/resource scope.
 
 ## Runtime chain
 

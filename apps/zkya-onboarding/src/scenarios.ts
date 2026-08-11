@@ -43,7 +43,7 @@ export const scenarios: readonly ReferenceScenario[] = [
     label: "Direct agent allowance",
     mode: "DIRECT",
     expected: "ALLOW",
-    summary: "An independently credentialed agent receives a signed, one-time v2 receipt.",
+    summary: "An independently credentialed agent receives a signed v2 receipt with durable consumption and latest-attempt state.",
   },
   {
     id: "delegated-allow",

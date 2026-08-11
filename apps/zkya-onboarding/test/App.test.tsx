@@ -41,7 +41,7 @@ function view(overrides: Partial<OnboardingView> = {}): OnboardingView {
       reasonCode: "POLICY_ALLOW",
     }],
     requiredApproval: { status: "NOT_REQUIRED" },
-    receipt: { status: "NOT_ISSUED" },
+    receipt: { consumptionStatus: "NOT_ISSUED", lastAttempt: { outcome: "NONE" } },
     policyId: "policy:test",
     policyVersion: hash("b"),
     ...overrides,
@@ -140,7 +140,7 @@ function basicClient(getView: () => OnboardingView = () => view()): OnboardingCl
       request: {} as StepUpRequest,
     })),
     resolveStepUpRequest: vi.fn(async () => ({ ok: false as const, reasonCode: "STEP_UP_REJECTED" })),
-    consumeReceipt: vi.fn(async () => ({ valid: true, reasonCode: "RECEIPT_VALID" })),
+    consumeReceipt: vi.fn(async () => ({ valid: true, reasonCode: "RECEIPT_VALID" } as const)),
     getOnboardingView: vi.fn(async () => getView()),
   };
 }
@@ -178,7 +178,11 @@ test("shows loading then direct ALLOW, multiple affiliations, full v2 consume, c
         { organizationId: "organization:research-reference", role: "review-participant" },
       ],
     },
-    receipt: { status: consumeCount === 0 ? "UNCONSUMED" : "CONSUMED" },
+    receipt: consumeCount === 0
+      ? { consumptionStatus: "UNCONSUMED", lastAttempt: { outcome: "NONE" } }
+      : consumeCount === 1
+      ? { consumptionStatus: "CONSUMED", lastAttempt: { outcome: "ACCEPTED", reasonCode: "RECEIPT_VALID" } }
+      : { consumptionStatus: "CONSUMED", lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_REPLAYED" } },
   }));
   client.issueCredential = vi.fn(async (input) => {
     await new Promise<void>((resolve) => { release = resolve; });
@@ -188,8 +192,8 @@ test("shows loading then direct ALLOW, multiple affiliations, full v2 consume, c
   client.consumeReceipt = vi.fn(async () => {
     consumeCount += 1;
     return consumeCount === 1
-      ? { valid: true, reasonCode: "RECEIPT_VALID" }
-      : { valid: false, reasonCode: "RECEIPT_REPLAYED" };
+      ? { valid: true, reasonCode: "RECEIPT_VALID" } as const
+      : { valid: false, reasonCode: "RECEIPT_REPLAYED" } as const;
   });
   render(<App client={client} />);
 
@@ -204,8 +208,9 @@ test("shows loading then direct ALLOW, multiple affiliations, full v2 consume, c
   expect(within(record).getByText("v2")).toBeTruthy();
 
   await user.click(within(record).getByRole("button", { name: "Verify & consume full v2 binding" }));
-  expect(await screen.findByText("RECEIPT_VALID")).toBeTruthy();
+  expect((await screen.findAllByText("RECEIPT_VALID")).length).toBeGreaterThan(0);
   expect(screen.getAllByText("CONSUMED").length).toBeGreaterThan(0);
+  expect(screen.getByText("ACCEPTED")).toBeTruthy();
   const consumeMock = vi.mocked(client.consumeReceipt);
   expect(consumeMock.mock.calls[0]?.[0].expected).toMatchObject({
     authorityMode: "DIRECT",
@@ -223,8 +228,11 @@ test("shows loading then direct ALLOW, multiple affiliations, full v2 consume, c
   });
 
   await user.click(screen.getByRole("button", { name: "Verify & consume full v2 binding" }));
-  expect(await screen.findByText("RECEIPT_REPLAYED")).toBeTruthy();
+  expect((await screen.findAllByText("RECEIPT_REPLAYED")).length).toBeGreaterThan(0);
   expect(screen.getByText("Attempt 2")).toBeTruthy();
+  expect(screen.getAllByText("CONSUMED").length).toBeGreaterThan(0);
+  expect(screen.getByText("Latest attempt").nextElementSibling?.textContent).toBe("REJECTED");
+  expect(screen.getByText("Attempt reason").nextElementSibling?.textContent).toBe("RECEIPT_REPLAYED");
   expect(client.getOnboardingView).toHaveBeenCalledTimes(3);
 });
 
@@ -288,7 +296,7 @@ test("runs production delegated scenario code and presents AGENT, ORGANIZATION g
       allowedResourceIds: ["dataset:reference-alpha"],
       status: "ACTIVE",
     },
-    receipt: { status: "UNCONSUMED" },
+    receipt: { consumptionStatus: "UNCONSUMED", lastAttempt: { outcome: "NONE" } },
   }));
   client.issueCredential = vi.fn(async (input) => ({
     credential: credential(input, ++credentialCount === 1 ? "credential:grantor" : "credential:delegate"),
@@ -408,11 +416,14 @@ test("presents zero affiliation plus expired, revoked delegation, scope mismatch
       reasonCode: "DELEGATION_REVOKED",
     }],
     requiredApproval: { status: "REJECTED", requestId: "step-up-request:rejected" },
-    receipt: { status: "CONSUMED" },
+    receipt: {
+      consumptionStatus: "CONSUMED",
+      lastAttempt: { outcome: "REJECTED", reasonCode: "RECEIPT_REPLAYED" },
+    },
   })} />);
   expect(screen.getAllByText("REVOKED").length).toBeGreaterThan(0);
   expect(screen.getByText("DELEGATION_REVOKED")).toBeTruthy();
-  expect(screen.getByText("REJECTED")).toBeTruthy();
+  expect(screen.getAllByText("REJECTED").length).toBeGreaterThan(0);
   expect(screen.getByText("CONSUMED")).toBeTruthy();
 });
 

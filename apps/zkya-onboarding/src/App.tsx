@@ -415,7 +415,13 @@ export function App({ client = defaultClient, initialView = null }: AppProps = {
             <article className="paper-card receipt-card" aria-labelledby="receipt-heading">
               <p className="card-number">05</p>
               <h3 id="receipt-heading">Signed receipt</h3>
-              <span className={`status-chip large ${tone(view.receipt.status)}`}>{view.receipt.status}</span>
+              <dl className="fact-list compact receipt-projection">
+                <Fact label="Durable consumption" value={view.receipt.consumptionStatus} />
+                <Fact label="Latest attempt" value={view.receipt.lastAttempt.outcome} />
+                {view.receipt.lastAttempt.outcome === "NONE" ? null : (
+                  <Fact label="Attempt reason" value={view.receipt.lastAttempt.reasonCode} mono />
+                )}
+              </dl>
               {execution?.receipt === undefined ? (
                 <p className="quiet">No authorizing signed receipt was issued for this decision lane.</p>
               ) : (
