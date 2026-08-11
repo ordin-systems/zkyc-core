@@ -799,6 +799,10 @@ type DelegatedCredentialState =
   | { readonly status: "MALFORMED" }
   | { readonly status: "VALID"; readonly credential: Credential };
 
+type GrantorCredentialState =
+  | { readonly status: "MALFORMED" }
+  | { readonly status: "VALID"; readonly credential: Credential };
+
 type DelegationState =
   | { readonly status: "MALFORMED" }
   | { readonly status: "VALID"; readonly delegation: CapabilityDelegation };
@@ -869,6 +873,7 @@ function fullyBoundDelegatedDenialMatchesRequest(
   decision: AccessDecision,
   input: DelegatedEvaluateRequest,
   credentialState: DelegatedCredentialState,
+  grantorCredentialState: GrantorCredentialState,
   delegationState: DelegationState,
   grantorCredentialId: string | undefined,
   expectedPolicy: CanonicalPolicy,
@@ -917,6 +922,29 @@ function fullyBoundDelegatedDenialMatchesRequest(
     delegation.delegateType !== credential.principalType;
   if (decision.reasonCode === "DELEGATION_DELEGATE_MISMATCH") return delegateMismatch;
   if (delegateMismatch) return false;
+
+  if (grantorCredentialState.status !== "VALID") return false;
+  const grantorCredential = grantorCredentialState.credential;
+  if (
+    credentialTimeState(grantorCredential, decision.decidedAt) !== "ACTIVE" ||
+    grantorCredential.issuerId !== delegation.issuerId
+  ) return false;
+
+  const grantorTupleMatches = grantorCredential.id === delegation.grantorCredentialId &&
+    grantorCredential.principalId === delegation.grantorId &&
+    grantorCredential.principalType === delegation.grantorType;
+  if (decision.reasonCode === "DELEGATION_GRANTOR_MISMATCH") return !grantorTupleMatches;
+  if (!grantorTupleMatches) return false;
+
+  const actionInScope = grantorCredential.allowedActions.includes(input.action) &&
+    delegation.allowedActions.includes(input.action);
+  if (decision.reasonCode === "ACTION_OUTSIDE_DELEGATION_SCOPE") return !actionInScope;
+  if (!actionInScope) return false;
+
+  const resourceInScope = grantorCredential.allowedResourceIds.includes(input.resourceId) &&
+    delegation.allowedResourceIds.includes(input.resourceId);
+  if (decision.reasonCode === "RESOURCE_OUTSIDE_DELEGATION_SCOPE") return !resourceInScope;
+  if (!resourceInScope) return false;
   return true;
 }
 
@@ -985,6 +1013,7 @@ function decisionMatchesRequestedPolicy(
   input: EvaluateRequest,
   directCredentialState: DirectCredentialState | undefined,
   delegatedCredentialState: DelegatedCredentialState | undefined,
+  grantorCredentialState: GrantorCredentialState | undefined,
   delegationState: DelegationState | undefined,
   grantorCredentialId: string | undefined,
 ): boolean {
@@ -994,7 +1023,10 @@ function decisionMatchesRequestedPolicy(
     return decision.reasonCode === "POLICY_ALLOW" &&
       rule?.effect === "ALLOW" &&
       (input.authorityMode === "DIRECT" ||
-        (delegatedCredentialState?.status === "VALID" && delegationState?.status === "VALID")) &&
+        (delegatedCredentialState?.status === "VALID" &&
+          grantorCredentialState?.status === "VALID" &&
+          delegationState?.status === "VALID" &&
+          grantorCredentialState.credential.issuerId === delegationState.delegation.issuerId)) &&
       suppliedAuthoritySatisfiesRule(input, rule, decision.decidedAt) &&
       decision.requiredApproverCapability === undefined;
   }
@@ -1002,7 +1034,10 @@ function decisionMatchesRequestedPolicy(
     return decision.reasonCode === "HUMAN_APPROVAL_REQUIRED" &&
       rule?.effect === "STEP_UP" &&
       (input.authorityMode === "DIRECT" ||
-        (delegatedCredentialState?.status === "VALID" && delegationState?.status === "VALID")) &&
+        (delegatedCredentialState?.status === "VALID" &&
+          grantorCredentialState?.status === "VALID" &&
+          delegationState?.status === "VALID" &&
+          grantorCredentialState.credential.issuerId === delegationState.delegation.issuerId)) &&
       suppliedAuthoritySatisfiesRule(input, rule, decision.decidedAt) &&
       decision.requiredApproverCapability === rule.approverCapability;
   }
@@ -1014,11 +1049,13 @@ function decisionMatchesRequestedPolicy(
   if (decision.grantorId !== undefined) {
     if (
       delegatedCredentialState === undefined ||
+      grantorCredentialState === undefined ||
       delegationState === undefined ||
       !fullyBoundDelegatedDenialMatchesRequest(
         decision,
         input,
         delegatedCredentialState,
+        grantorCredentialState,
         delegationState,
         grantorCredentialId,
         policy,
@@ -1209,6 +1246,7 @@ export class ZkycReferenceClient {
       const expectedContextHash = await computeContextHash(input.actionContext);
       let directCredentialState: DirectCredentialState | undefined;
       let delegatedCredentialState: DelegatedCredentialState | undefined;
+      let grantorCredentialState: GrantorCredentialState | undefined;
       let delegationState: DelegationState | undefined;
       let grantorCredentialId: string | undefined;
       let correlationInput = input;
@@ -1241,6 +1279,16 @@ export class ZkycReferenceClient {
         }
         try {
           const credential = validateCredentialResponse({
+            credential: input.grantorCredential,
+          }).credential;
+          grantorCredentialState = credential.scopeHash === await computeScopeHash(credential)
+            ? { status: "VALID", credential }
+            : { status: "MALFORMED" };
+        } catch {
+          grantorCredentialState = { status: "MALFORMED" };
+        }
+        try {
+          const credential = validateCredentialResponse({
             credential: input.delegateIdentityCredential,
           }).credential;
           delegatedCredentialState = credential.scopeHash === await computeScopeHash(credential)
@@ -1266,6 +1314,9 @@ export class ZkycReferenceClient {
             ...input,
             delegateIdentityCredential: delegatedCredentialState.credential,
             delegation: delegationState.delegation,
+            ...(grantorCredentialState.status === "VALID"
+              ? { grantorCredential: grantorCredentialState.credential }
+              : {}),
           };
         }
       }
@@ -1284,6 +1335,7 @@ export class ZkycReferenceClient {
           correlationInput,
           directCredentialState,
           delegatedCredentialState,
+          grantorCredentialState,
           delegationState,
           grantorCredentialId,
         ) &&
@@ -1359,24 +1411,8 @@ export class ZkycReferenceClient {
           } else {
             requireResponseCorrelation(delegationState?.status === "VALID");
             const delegation = delegationState.delegation;
-            const decisionPrecedesGrantorCredentialValidation =
-              decision.reasonCode === "DELEGATION_NOT_YET_VALID" ||
-              decision.reasonCode === "DELEGATION_EXPIRED" ||
-              decision.reasonCode === "DELEGATION_REVOKED" ||
-              decision.reasonCode === "DELEGATION_POLICY_MISMATCH" ||
-              decision.reasonCode === "DELEGATION_GRANTOR_CREDENTIAL_INVALID" ||
-              decision.reasonCode === "DELEGATION_DELEGATE_MISMATCH" ||
-              decision.reasonCode === "DELEGATION_IDENTITIES_NOT_DISTINCT";
-            let grantorCredentialCorrelates = true;
-            if (!decisionPrecedesGrantorCredentialValidation) {
-              const expectedGrantorCredentialScopeHash = await computeScopeHash(input.grantorCredential);
-              grantorCredentialCorrelates =
-                input.grantorCredential.scopeHash === expectedGrantorCredentialScopeHash &&
-                delegation.issuerId === input.grantorCredential.issuerId;
-            }
             requireResponseCorrelation(
               delegateCredential.issuerId === delegation.issuerId &&
-              grantorCredentialCorrelates &&
               decision.effectiveScopeHash === delegation.scopeHash &&
               decision.grantorId === delegation.grantorId &&
               decision.grantorType === delegation.grantorType &&
