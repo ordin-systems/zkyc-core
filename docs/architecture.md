@@ -15,18 +15,23 @@ Exact action/resource/context + versioned policy
         ↓
 Deterministic evaluator
         ↓
-ALLOW | DENY | STEP_UP + reason + complete authority bindings
+ALLOW | DENY | STEP_UP + reason + trusted binding stage
         │
-        ├─ ALLOW → trusted adapter issues receipt v2
-        │          → consumer supplies complete expected binding
-        │          → current authority revalidated
-        │          → receipt nonce consumed once
-        │
-        └─ STEP_UP → retained decision opens request v2
-                    → exact-scope HUMAN resolves
-                    → current authority revalidated
-                    → authorization v2 consumed once
+        ├─ unbound direct/delegated denial
+        ├─ acting-only delegated denial
+        └─ bound direct or fully bound delegated decision
+                  │
+                  ├─ fully bound ALLOW → trusted adapter issues receipt v2
+                  │                      → current authority revalidated
+                  │                      → receipt nonce consumed once
+                  │
+                  └─ fully bound STEP_UP → retained request v2
+                                         → exact-scope HUMAN resolves
+                                         → current authority revalidated
+                                         → authorization v2 consumed once
 ```
+
+Negative, unbound, and partially bound results never receive receipts. Decision fields reflect only the authority stage core actually trusted; the adapter and SDK do not fill missing authority fields from caller artifacts.
 
 ## Components
 
@@ -38,9 +43,15 @@ ALLOW | DENY | STEP_UP + reason + complete authority bindings
 6. **Receipt service** — canonical authority-bound payload v2, HMAC-SHA256 signing, timing-safe verification, revalidation, and consumption.
 7. **Atomic nonce store** — domain-separated one-time consumption contract; the included adapter is in-memory.
 8. **Hono trusted adapter** — strict JSON routes, retained evaluator provenance, current onboarding views, and loopback runtime.
-9. **TypeScript SDK** — browser-compatible transport with exact runtime validation of successful/error responses.
+9. **TypeScript SDK** — browser-compatible transport with exact runtime validation of unbound direct, unbound delegated, acting-only delegated, bound direct, and fully bound delegated outcomes.
 10. **React/Vite interfaces** — the operator authority cockpit and dedicated zkYA onboarding reference.
 11. **Evidence runners** — deterministic versioned transcripts plus real local Chromium smoke through the built stack.
+
+## SDK correlation boundary
+
+The SDK correlates request-observable response facts: mode, typed identity and affiliations, action, resource, context, policy, artifact hashes, time, scope, delegation identities, and attenuation. Contradictions fail as `INVALID_RESPONSE`.
+
+Private credential/delegation registration and revocation are server-authoritative. The SDK permits coarse unbound `DELEGATION_GRANTOR_CREDENTIAL_INVALID` for cross-authority/core contexts while the public Hono path normally emits the fully bound form. Denial-only acceptance of a correctly shaped unknown, revoked, or grantor-invalid reason is not independent proof of private state and cannot widen authority.
 
 ## Direct and delegated identity lanes
 
@@ -48,13 +59,15 @@ Direct mode uses one active credential bound to the acting principal. Delegated 
 
 ## Trusted-adapter boundary
 
-There is no generic receipt-signing endpoint. The API issues a receipt only from the `ALLOW` generated in the current evaluation request. Step-up creation accepts a retained decision-log ID instead of a caller-supplied decision object.
+There is no generic receipt-signing endpoint. The API issues a receipt only from the fully authority-bound `ALLOW` generated in the current evaluation request. Step-up creation accepts a retained decision-log ID instead of a caller-supplied decision object.
 
 These invariants strengthen issuer-side provenance but do not make the unauthenticated adapter production-safe. Core issuer primitives still assume trusted callers when used outside the adapter.
 
 ## Retained state and onboarding
 
-Credentials, delegations, revocations, decisions, step-up state, onboarding projections, receipt status, and nonces are retained in memory. `GET /zkya/onboarding-views/:decisionLogId` recomputes current authority/approval/receipt state from those retained artifacts. Restarting the API clears all state.
+Credentials, delegations, revocations, decisions, step-up state, onboarding projections, receipt consumption/attempt state, and nonces are retained in memory. `GET /zkya/onboarding-views/:decisionLogId` recomputes current authority and approval while projecting durable `consumptionStatus` separately from `lastAttempt`.
+
+Durable consumption changes only from `UNCONSUMED` to `CONSUMED`. A later rejected replay stays `CONSUMED` and records `REJECTED / RECEIPT_REPLAYED`; malformed or unassociated input leaves both axes unchanged. Restarting the API clears all retained state.
 
 ## Interfaces and browser evidence
 
@@ -62,4 +75,4 @@ Both UIs invoke the same strict SDK/API authority path. `npm run test:browser` s
 
 ## Maturity boundary
 
-The candidate is not production identity/KYC/AML, ZK verification, authentication, deployment, durability, protected execution, adoption, or external validation. The SDK and UIs cannot widen authority and do not execute downstream actions.
+This is an integrated local `v0.3.1` corrective candidate over historical immutable `v0.3.0`. The successor is not yet merged, tagged, released, or published and does not establish production identity/KYC/AML, ZK verification, authentication, deployment, durability, protected execution, adoption, or external validation. The SDK and UIs cannot widen authority and do not execute downstream actions.

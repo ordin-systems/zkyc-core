@@ -1,8 +1,8 @@
 # Claims and Limitations
 
-## Supported v0.3 candidate claims
+## Supported v0.3.1 corrective-candidate claims
 
-At executable baseline `20fa75cf847e064e84f07f6426908412a5811be6`, the integrated local reference candidate supports these bounded claims:
+The exact current checkout supports these bounded local-reference claims:
 
 - exact `HUMAN`, `ORGANIZATION`, and `AGENT` principal types;
 - credential v2 binding of principal ID/type, credential-bound affiliations, capabilities, exact actions, exact resources, issuer, validity, and scope hash;
@@ -18,13 +18,14 @@ At executable baseline `20fa75cf847e064e84f07f6426908412a5811be6`, the integrate
 - timing-safe verification and atomic one-time receipt/authorization consumption;
 - Hono reference API with retained evaluator provenance and current-state onboarding projections;
 - stable delegation validation codes preserved through the Hono error envelope and SDK API errors;
-- browser-compatible TypeScript SDK with strict exact-schema runtime validation and recomputed exact typed-subject affiliations, scope, context, policy, capability/affiliation satisfaction, decision-time validity, grantor-scope attenuation, outcome, delegation-binding, receipt, resolution, and step-up request/response correlation;
+- browser-compatible TypeScript SDK with strict exact-schema validation across unbound direct, bound direct, unbound delegated, acting-only delegated, and fully bound delegated outcomes; complete request-observable success/denial correlation; issuance-equivalent delegated attenuation checks; discriminated consume responses; and exact monotonic receipt-projection validation;
+- explicit SDK boundary that private registration and revocation remain server-authoritative denial facts, including coarse unbound `DELEGATION_GRANTOR_CREDENTIAL_INVALID` for cross-authority/core contexts while the public Hono path normally emits the fully bound form;
 - operator and zkYA React/Vite reference UIs;
 - deterministic core fixtures plus versioned full-stack transcripts executed by API and SDK tests;
 - a real local Chromium test through the built zkYA UI, SDK, and loopback API;
 - fail-closed recursive publication/archive scanning, strict tar-padding validation, and source-derived package allowlists exercised through blank-consumer imports and an installed API probe.
 
-Current behavioral counts are core 46, API/server 13, SDK 12, operator UI 3, zkYA component 9, scanner regression 9, release-tooling regression 7, and Chromium E2E 1. Typechecks, builds, formatting, security scanning, package verification, and dependency audit are checks rather than tests.
+Current behavioral counts are core 46, API/server 13, SDK 223, operator UI 3, zkYA component 9, scanner regression 9, release-tooling regression 8, and Chromium E2E 1. Typechecks, builds, formatting, security scanning, package verification, and dependency audit are checks rather than tests.
 
 ## Non-claims
 
@@ -38,13 +39,13 @@ This candidate does not establish:
 - asymmetric/public attestation, independently portable credentials, or independent receipt verification outside the shared-secret trust domain;
 - separation of duties or a blanket self-approval prohibition beyond the exact human/type/capability/action/resource checks implemented;
 - protected-action execution, payment/x402 behavior, custody, or webhooks;
-- customers, adoption, scale, production use, independent review, or external validation;
-- publication, merge, tag, immutable v0.3 release, public v0.3 URL, archive digest, logged-out readback, or npm registry package.
+- customers, adoption, scale, production use, independent external review, or external validation;
+- merge, tag, immutable `v0.3.1` release, public `v0.3.1` URL, archive digest, logged-out successor readback, or npm registry package.
 
 ## Adapter and evidence boundary
 
 The Hono adapter issues receipts only in the evaluation transaction that produced the matching `ALLOW`, retains evaluator results server-side, creates step-up requests from retained decision-log IDs, and requires complete authority bindings at consumption. It is nevertheless unauthenticated and in-memory and must not be deployed as-is.
 
-The candidate source and tests are post-CV evidence. They do not retroactively change what existed at the frozen CV date or at historical `v0.2.1-full-stack-reference`.
+The candidate source and tests are post-CV evidence. They do not retroactively change what existed at the frozen CV date or inside historical immutable `v0.2.1-full-stack-reference` and `v0.3.0` releases.
 
 `zkPassProofId` and similar identifiers remain contextual metadata only.

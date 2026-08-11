@@ -1,6 +1,6 @@
 {
   "name": "@ordin/zkya-onboarding-reference",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Executable local zkYA onboarding reference for retained zKYC authority state",
   "license": "UNLICENSED",

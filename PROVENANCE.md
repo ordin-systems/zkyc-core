@@ -4,7 +4,7 @@
 
 zKYC Core originated in the zKYC project. Canonical project-level credit is:
 
-Mike “Mizzy” Barrera and Monique Abrams — joint authors and co-architects.
+**Mike “Mizzy” Barrera and Monique Abrams — joint authors and co-architects.**
 
 No responsibility split is asserted. Canonical stewardship and publication responsibility transferred to ORDIN in 2026.
 
@@ -17,15 +17,26 @@ ORDIN is the canonical maintainer and repository owner for this reference implem
 - `v0.1.0-reference` is the historical bounded TypeScript authority-core extraction published on 2026-08-08.
 - `v0.2.0-full-stack-reference` is the historical sanitized Hono/SDK/operator-UI successor.
 - `v0.2.1-full-stack-reference` is the historical immutable patch release that preserves v0.2 runtime behavior and records joint author/co-architect credit.
-- `v0.3.0` exists only as an integrated local candidate built forward from v0.2.1. Its executable baseline is `20fa75cf847e064e84f07f6426908412a5811be6`.
+- `v0.3.0` is the historical immutable integrated-reference release published on 2026-08-10 at commit `c67f16c39d67b4c56c88d06c9738d4a164d2a27e` and tree `e73f3401718d01a7e5bcca1aa84b728e7fa55ccc`.
+- `v0.3.1` is the current forward-only corrective candidate. It does not modify or retag `v0.3.0` or any earlier release.
 
-The v0.3 candidate adds typed principal participation, explicit direct/delegated authority, scoped credentials and delegations, receipt/step-up v2, retained zkYA onboarding views, two UIs, strict SDK validation, versioned transcripts, and local Chromium smoke coverage. It does not rewrite historical tags or imply that candidate behavior existed at their release dates.
+The `v0.3.1` candidate completes SDK denial correlation and monotonic receipt projection, reconciles current-main publication truth, and preserves the same bounded local-reference maturity ceiling.
 
-## Candidate publication boundary
+## Automated implementation and review provenance
 
-Nothing in this candidate documentation proves that v0.3 was pushed, merged, tagged, released, published, made immutable, independently approved, or read back while logged out. No npm registry publication is authorized.
+Automated AI assistants were used off-GitHub to support implementation and perform separate specification and code-quality review passes. Their outputs informed maintainer decisions and are process provenance only. They are not authors, owners, maintainers, external validators, or third-party security auditors, and automated review is not independent external approval.
 
-A later exact-tag verification receipt may record the tag commit, command results, and asset hashes. A later, separately dated post-publication sidecar may record GitHub API state, logged-out downloads, and checksum/extraction readback. Future-event fields must not be embedded for later completion inside the tag they are meant to verify.
+Project authorship remains solely recorded at the project level as:
+
+**Mike “Mizzy” Barrera and Monique Abrams — joint authors and co-architects.**
+
+Git history and retained review artifacts record later machine-assisted and human-directed implementation activity without transferring authorship or stewardship.
+
+## Current candidate publication boundary
+
+The `v0.3.1` candidate is not yet merged, tagged, released, published, or verified through protected current-head CI and post-publication readback. No npm registry publication is authorized.
+
+A later exact-tag verification receipt may record tag commit/tree, environment, command results, and already-generated asset hashes. A separately dated post-publication sidecar may then record GitHub API state, logged-out downloads, and checksum/extraction readback. Future-event fields are not embedded for later completion inside the tag they are meant to verify.
 
 ## Public-evidence boundary
 

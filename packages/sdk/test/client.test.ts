@@ -216,7 +216,7 @@ test("SDK executes the direct v0.3 lifecycle through the real Hono adapter", asy
   assert.deepEqual(await client.health(), {
     ok: true,
     service: "zkyc-core-api-reference",
-    version: "0.3.0",
+    version: "0.3.1",
     state: "in-memory-reference-only",
   });
 
@@ -3509,7 +3509,7 @@ test("SDK resolves a browser-relative base URL against the current page", async 
         return Promise.resolve(jsonResponse({
           ok: true,
           service: "zkyc-core-api-reference",
-          version: "0.3.0",
+          version: "0.3.1",
           state: "in-memory-reference-only",
         }));
       },

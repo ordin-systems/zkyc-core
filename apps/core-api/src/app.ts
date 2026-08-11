@@ -573,7 +573,7 @@ export function createReferenceApp(options: ReferenceAppOptions): Hono {
   app.get("/health", (context) => context.json({
     ok: true,
     service: "zkyc-core-api-reference",
-    version: "0.3.0",
+    version: "0.3.1",
     state: "in-memory-reference-only",
   }));
 
