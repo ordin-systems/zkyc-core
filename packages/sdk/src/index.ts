@@ -804,12 +804,12 @@ type DelegationState =
   | { readonly status: "VALID"; readonly delegation: CapabilityDelegation };
 
 function credentialTimeState(
-  credential: Credential,
+  artifact: { readonly issuedAt: string; readonly expiresAt: string },
   decidedAtValue: string,
 ): "NOT_YET_VALID" | "EXPIRED" | "ACTIVE" {
   const decidedAt = Date.parse(decidedAtValue);
-  if (decidedAt < Date.parse(credential.issuedAt)) return "NOT_YET_VALID";
-  if (decidedAt >= Date.parse(credential.expiresAt)) return "EXPIRED";
+  if (decidedAt < Date.parse(artifact.issuedAt)) return "NOT_YET_VALID";
+  if (decidedAt >= Date.parse(artifact.expiresAt)) return "EXPIRED";
   return "ACTIVE";
 }
 
@@ -862,6 +862,61 @@ function delegatedDenialMatchesRequest(
   if (decision.reasonCode === "DELEGATION_UNKNOWN") {
     return delegationState.status === "VALID";
   }
+  return true;
+}
+
+function fullyBoundDelegatedDenialMatchesRequest(
+  decision: AccessDecision,
+  input: DelegatedEvaluateRequest,
+  credentialState: DelegatedCredentialState,
+  delegationState: DelegationState,
+  grantorCredentialId: string | undefined,
+  expectedPolicy: CanonicalPolicy,
+): boolean {
+  if (
+    credentialState.status !== "VALID" ||
+    delegationState.status !== "VALID" ||
+    decision.grantorId === undefined
+  ) return false;
+
+  const credential = credentialState.credential;
+  const delegation = delegationState.delegation;
+  if (
+    credentialTimeState(credential, decision.decidedAt) !== "ACTIVE" ||
+    credential.principalId !== input.principal.id ||
+    credential.principalType !== input.principal.type ||
+    !sameCanonicalAffiliations(credential.affiliations, input.principal.affiliations) ||
+    credential.id === grantorCredentialId ||
+    credential.issuerId !== delegation.issuerId ||
+    decision.actingCredentialId !== credential.id ||
+    decision.effectiveScopeHash !== delegation.scopeHash ||
+    decision.grantorId !== delegation.grantorId ||
+    decision.grantorType !== delegation.grantorType ||
+    decision.grantorCredentialId !== delegation.grantorCredentialId ||
+    decision.delegationId !== delegation.id ||
+    decision.delegationBindingHash !== delegation.delegationBindingHash ||
+    !sameUnverifiedMetadata(decision.unverifiedMetadata, credential.unverifiedMetadata)
+  ) return false;
+
+  const policyMatches = delegation.policyId === expectedPolicy.id &&
+    delegation.policyVersion === expectedPolicy.version;
+  if (decision.reasonCode === "DELEGATION_POLICY_MISMATCH") return !policyMatches;
+  if (!policyMatches) return false;
+
+  const timeState = credentialTimeState(delegation, decision.decidedAt);
+  if (decision.reasonCode === "DELEGATION_NOT_YET_VALID") return timeState === "NOT_YET_VALID";
+  if (decision.reasonCode === "DELEGATION_EXPIRED") return timeState === "EXPIRED";
+  if (timeState !== "ACTIVE") return false;
+
+  if (decision.reasonCode === "DELEGATION_REVOKED") return true;
+  if (decision.reasonCode === "DELEGATION_GRANTOR_CREDENTIAL_INVALID") return true;
+  if (decision.reasonCode === "DELEGATION_IDENTITIES_NOT_DISTINCT") return false;
+  const delegateMismatch = delegation.delegateId !== input.principal.id ||
+    delegation.delegateType !== input.principal.type ||
+    delegation.delegateId !== credential.principalId ||
+    delegation.delegateType !== credential.principalType;
+  if (decision.reasonCode === "DELEGATION_DELEGATE_MISMATCH") return delegateMismatch;
+  if (delegateMismatch) return false;
   return true;
 }
 
@@ -957,6 +1012,18 @@ function decisionMatchesRequestedPolicy(
       directDenialMatchesRequest(decision, rule, input, directCredentialState);
   }
   if (decision.grantorId !== undefined) {
+    if (
+      delegatedCredentialState === undefined ||
+      delegationState === undefined ||
+      !fullyBoundDelegatedDenialMatchesRequest(
+        decision,
+        input,
+        delegatedCredentialState,
+        delegationState,
+        grantorCredentialId,
+        policy,
+      )
+    ) return false;
     if (decision.reasonCode === "POLICY_DENY") return rule?.effect === "DENY";
     if (decision.reasonCode === "ACTION_NOT_PERMITTED") return rule === undefined;
     return decision.requiredApproverCapability === undefined;
@@ -1290,11 +1357,8 @@ export class ZkycReferenceClient {
                 delegateIdentityMismatch),
             );
           } else {
-            const expectedDelegationScopeHash = await computeScopeHash(input.delegation);
-            const expectedDelegationBindingHash = await computeDelegationBindingHash(input.delegation);
-            const delegationMatchesExpectedPolicy =
-              input.delegation.policyId === expectedPolicy.id &&
-              input.delegation.policyVersion === expectedPolicy.version;
+            requireResponseCorrelation(delegationState?.status === "VALID");
+            const delegation = delegationState.delegation;
             const decisionPrecedesGrantorCredentialValidation =
               decision.reasonCode === "DELEGATION_NOT_YET_VALID" ||
               decision.reasonCode === "DELEGATION_EXPIRED" ||
@@ -1308,22 +1372,17 @@ export class ZkycReferenceClient {
               const expectedGrantorCredentialScopeHash = await computeScopeHash(input.grantorCredential);
               grantorCredentialCorrelates =
                 input.grantorCredential.scopeHash === expectedGrantorCredentialScopeHash &&
-                input.delegation.issuerId === input.grantorCredential.issuerId;
+                delegation.issuerId === input.grantorCredential.issuerId;
             }
             requireResponseCorrelation(
-              input.delegation.scopeHash === expectedDelegationScopeHash &&
-              input.delegation.delegationBindingHash === expectedDelegationBindingHash &&
-              input.delegateIdentityCredential.issuerId === input.delegation.issuerId &&
-              (decision.reasonCode === "DELEGATION_POLICY_MISMATCH"
-                ? !delegationMatchesExpectedPolicy
-                : delegationMatchesExpectedPolicy) &&
+              delegateCredential.issuerId === delegation.issuerId &&
               grantorCredentialCorrelates &&
-              decision.effectiveScopeHash === expectedDelegationScopeHash &&
-              decision.grantorId === input.delegation.grantorId &&
-              decision.grantorType === input.delegation.grantorType &&
-              decision.grantorCredentialId === input.delegation.grantorCredentialId &&
-              decision.delegationId === input.delegation.id &&
-              decision.delegationBindingHash === input.delegation.delegationBindingHash,
+              decision.effectiveScopeHash === delegation.scopeHash &&
+              decision.grantorId === delegation.grantorId &&
+              decision.grantorType === delegation.grantorType &&
+              decision.grantorCredentialId === delegation.grantorCredentialId &&
+              decision.delegationId === delegation.id &&
+              decision.delegationBindingHash === delegation.delegationBindingHash,
             );
           }
         }

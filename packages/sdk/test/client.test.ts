@@ -538,6 +538,39 @@ test("SDK accepts real Hono fully bound DELEGATION_POLICY_MISMATCH", async () =>
   assert.equal(evaluated.receipt, undefined);
 });
 
+test("SDK accepts real Hono fully bound revoked delegation denial", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  assert.deepEqual(await client.revokeDelegation(fixture.delegation.id, {
+    reason: "delegated-evaluation-test",
+  }), { revoked: true });
+
+  const evaluated = await client.evaluate({
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: fixture.delegateIdentityCredential,
+    grantorCredential: fixture.grantorCredential,
+    delegation: fixture.delegation,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-revoked-delegation" },
+    policy: fixture.delegatedPolicy,
+    issueReceipt: true,
+    receiptExpiresAt: ARTIFACT_EXPIRY,
+  });
+
+  assert.equal(evaluated.decision.outcome, "DENY");
+  assert.equal(evaluated.decision.reasonCode, "DELEGATION_REVOKED");
+  assert.equal(evaluated.decision.actingCredentialId, fixture.delegateIdentityCredential.id);
+  assert.equal(evaluated.decision.effectiveScopeHash, fixture.delegation.scopeHash);
+  assert.equal(evaluated.decision.grantorId, fixture.delegation.grantorId);
+  assert.equal(evaluated.decision.grantorType, fixture.delegation.grantorType);
+  assert.equal(evaluated.decision.grantorCredentialId, fixture.delegation.grantorCredentialId);
+  assert.equal(evaluated.decision.delegationId, fixture.delegation.id);
+  assert.equal(evaluated.decision.delegationBindingHash, fixture.delegation.delegationBindingHash);
+  assert.equal(evaluated.receipt, undefined);
+});
+
 test("SDK accepts real Hono fully bound malformed grantor credential denial", async () => {
   const { client } = harness();
   const fixture = await issueDelegatedFixture(client);
@@ -1088,6 +1121,40 @@ const delegatedActingOnlyDenyDecision = {
   effectiveScopeHash: delegatedCorrelationCredential.scopeHash,
 } as const;
 
+function correlatedDelegation(
+  overrides: Partial<CapabilityDelegation> = {},
+): CapabilityDelegation {
+  const altered = { ...delegatedCorrelationDelegation, ...overrides };
+  const scopeHash = computeScopeHash({
+    capabilities: altered.capabilities,
+    allowedActions: altered.allowedActions,
+    allowedResourceIds: altered.allowedResourceIds,
+  });
+  const rebound = { ...altered, scopeHash };
+  return {
+    ...rebound,
+    delegationBindingHash: computeDelegationBindingHash(rebound as never),
+  };
+}
+
+function fullyBoundDelegatedDenial(
+  reasonCode: string,
+  delegation: CapabilityDelegation = delegatedCorrelationDelegation,
+  credential: Credential = delegatedCorrelationCredential,
+) {
+  return {
+    ...delegatedActingOnlyDenyDecision,
+    reasonCode,
+    actingCredentialId: credential.id,
+    effectiveScopeHash: delegation.scopeHash,
+    grantorId: delegation.grantorId,
+    grantorType: delegation.grantorType,
+    grantorCredentialId: delegation.grantorCredentialId,
+    delegationId: delegation.id,
+    delegationBindingHash: delegation.delegationBindingHash,
+  };
+}
+
 function delegatedDenialClient(decision: unknown): ZkycReferenceClient {
   return new ZkycReferenceClient({
     baseUrl: "https://delegated-denial-correlation.reference",
@@ -1295,6 +1362,254 @@ test("SDK correlates delegated acting-stage delegation denials", async (t) => {
       reasonCode: "DELEGATION_UNKNOWN",
     }).evaluate({ ...delegatedCorrelationInput, delegation: malformedDelegations[0]! }));
   });
+});
+
+test("SDK correlates fully bound delegated status and identity denials in core order", async (t) => {
+  const policyMismatchDelegation = correlatedDelegation({
+    policyId: "policy:other",
+    policyVersion: HASH_1,
+  });
+  const notYetValidDelegation = correlatedDelegation({ issuedAt: LATER });
+  const expiredDelegation = correlatedDelegation({
+    issuedAt: "2026-05-31T23:00:00.000Z",
+    expiresAt: START,
+  });
+  const delegateMismatchDelegation = correlatedDelegation({ delegateId: "agent:other" });
+  const malformedGrantorCredential = {} as Credential;
+  const acceptedStages = [
+    {
+      reasonCode: "DELEGATION_POLICY_MISMATCH",
+      delegation: policyMismatchDelegation,
+      grantorCredential: staticCredential,
+    },
+    {
+      reasonCode: "DELEGATION_NOT_YET_VALID",
+      delegation: notYetValidDelegation,
+      grantorCredential: staticCredential,
+    },
+    {
+      reasonCode: "DELEGATION_EXPIRED",
+      delegation: expiredDelegation,
+      grantorCredential: staticCredential,
+    },
+    {
+      reasonCode: "DELEGATION_REVOKED",
+      delegation: delegatedCorrelationDelegation,
+      grantorCredential: staticCredential,
+    },
+    {
+      reasonCode: "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+      delegation: delegatedCorrelationDelegation,
+      grantorCredential: malformedGrantorCredential,
+    },
+    {
+      reasonCode: "DELEGATION_DELEGATE_MISMATCH",
+      delegation: delegateMismatchDelegation,
+      grantorCredential: staticCredential,
+    },
+  ] as const;
+
+  for (const stage of acceptedStages) {
+    const decision = fullyBoundDelegatedDenial(stage.reasonCode, stage.delegation);
+    const input = {
+      ...delegatedCorrelationInput,
+      delegation: stage.delegation,
+      grantorCredential: stage.grantorCredential,
+    };
+    await t.test(`accepts reachable ${stage.reasonCode} without a receipt`, async () => {
+      const evaluated = await delegatedDenialClient(decision).evaluate(input);
+      assert.equal(evaluated.decision.reasonCode, stage.reasonCode);
+      assert.equal(evaluated.receipt, undefined);
+    });
+
+    const bindingContradictions = [
+      { name: "acting credential ID", override: { actingCredentialId: "credential:forged" } },
+      { name: "effective delegation scope hash", override: { effectiveScopeHash: HASH_1 } },
+      { name: "grantor ID", override: { grantorId: "principal:forged" } },
+      { name: "grantor type", override: { grantorType: "ORGANIZATION" } },
+      { name: "grantor credential ID", override: { grantorCredentialId: "credential:forged" } },
+      { name: "delegation ID", override: { delegationId: "delegation:forged" } },
+      { name: "delegation binding hash", override: { delegationBindingHash: HASH_1 } },
+      {
+        name: "unverified metadata",
+        override: { unverifiedMetadata: { zkPassProofId: "proof:forged" } },
+      },
+    ] as const;
+    for (const contradiction of bindingContradictions) {
+      await t.test(`${stage.reasonCode} rejects forged ${contradiction.name}`, async () => {
+        await expectInvalidResponse(() => delegatedDenialClient({
+          ...decision,
+          ...contradiction.override,
+        }).evaluate(input));
+      });
+    }
+  }
+
+  await t.test("rejects every later status reason when canonical policy mismatches first", async () => {
+    for (const reasonCode of [
+      "DELEGATION_NOT_YET_VALID",
+      "DELEGATION_EXPIRED",
+      "DELEGATION_REVOKED",
+      "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+      "DELEGATION_DELEGATE_MISMATCH",
+      "DELEGATION_IDENTITIES_NOT_DISTINCT",
+    ] as const) {
+      await expectInvalidResponse(() => delegatedDenialClient(
+        fullyBoundDelegatedDenial(reasonCode, policyMismatchDelegation),
+      ).evaluate({ ...delegatedCorrelationInput, delegation: policyMismatchDelegation }));
+    }
+  });
+
+  await t.test("rejects policy mismatch when the validated delegation matches canonical policy", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_POLICY_MISMATCH"),
+    ).evaluate(delegatedCorrelationInput));
+  });
+
+  await t.test("rejects inactive time reasons at the wrong boundary", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_NOT_YET_VALID"),
+    ).evaluate(delegatedCorrelationInput));
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_EXPIRED"),
+    ).evaluate(delegatedCorrelationInput));
+  });
+
+  for (const inactiveDelegation of [notYetValidDelegation, expiredDelegation]) {
+    await t.test(`rejects later reasons while delegation is ${
+      inactiveDelegation === notYetValidDelegation ? "not yet valid" : "expired"
+    }`, async () => {
+      for (const reasonCode of [
+        "DELEGATION_REVOKED",
+        "DELEGATION_GRANTOR_CREDENTIAL_INVALID",
+        "DELEGATION_DELEGATE_MISMATCH",
+        "DELEGATION_IDENTITIES_NOT_DISTINCT",
+      ] as const) {
+        await expectInvalidResponse(() => delegatedDenialClient(
+          fullyBoundDelegatedDenial(reasonCode, inactiveDelegation),
+        ).evaluate({ ...delegatedCorrelationInput, delegation: inactiveDelegation }));
+      }
+    });
+  }
+
+  await t.test("rejects unknown and malformed delegation reasons with forged full bindings", async () => {
+    for (const reasonCode of ["DELEGATION_MALFORMED", "DELEGATION_UNKNOWN"] as const) {
+      await expectInvalidResponse(() => delegatedDenialClient(
+        fullyBoundDelegatedDenial(reasonCode),
+      ).evaluate(delegatedCorrelationInput));
+    }
+  });
+
+  await t.test("rejects defensive fully bound identities-not-distinct for a valid delegation", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_IDENTITIES_NOT_DISTINCT"),
+    ).evaluate(delegatedCorrelationInput));
+  });
+
+  await t.test("rejects fully bound delegate mismatch when delegation identities match", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_DELEGATE_MISMATCH"),
+    ).evaluate(delegatedCorrelationInput));
+  });
+
+  await t.test("rejects later full-bound reasons when delegate mismatch must occur first", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_GRANTOR_MISMATCH", delegateMismatchDelegation),
+    ).evaluate({
+      ...delegatedCorrelationInput,
+      delegation: delegateMismatchDelegation,
+    }));
+  });
+
+  await t.test("accepts schema-valid delegate type contradiction with full binding shape", async () => {
+    const typeMismatchDelegation = correlatedDelegation({ delegateType: "ORGANIZATION" });
+    const evaluated = await delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_DELEGATE_MISMATCH", typeMismatchDelegation),
+    ).evaluate({ ...delegatedCorrelationInput, delegation: typeMismatchDelegation });
+    assert.equal(evaluated.decision.reasonCode, "DELEGATION_DELEGATE_MISMATCH");
+    assert.equal(evaluated.decision.delegationId, typeMismatchDelegation.id);
+    assert.equal(evaluated.receipt, undefined);
+  });
+
+  const earlierCredentialContradictions: readonly {
+    readonly name: string;
+    readonly credential: Credential;
+    readonly grantorCredential?: Credential;
+  }[] = [
+    {
+      name: "malformed delegate credential",
+      credential: { ...delegatedCorrelationCredential, scopeHash: HASH_0 },
+    },
+    {
+      name: "not-yet-valid delegate credential",
+      credential: { ...delegatedCorrelationCredential, issuedAt: LATER },
+    },
+    {
+      name: "expired delegate credential",
+      credential: { ...delegatedCorrelationCredential, expiresAt: START },
+    },
+    {
+      name: "delegate principal ID contradiction",
+      credential: { ...delegatedCorrelationCredential, principalId: "agent:other" },
+    },
+    {
+      name: "delegate principal type contradiction",
+      credential: { ...delegatedCorrelationCredential, principalType: "ORGANIZATION" },
+    },
+    {
+      name: "delegate canonical affiliation contradiction",
+      credential: {
+        ...delegatedCorrelationCredential,
+        affiliations: [{ organizationId: "organization:other", role: "member" }],
+      },
+    },
+    {
+      name: "equal supplied grantor credential ID",
+      credential: delegatedCorrelationCredential,
+      grantorCredential: delegatedCorrelationCredential,
+    },
+  ];
+  for (const contradiction of earlierCredentialContradictions) {
+    await t.test(`rejects full binding after ${contradiction.name}`, async () => {
+      await expectInvalidResponse(() => delegatedDenialClient(fullyBoundDelegatedDenial(
+        "DELEGATION_REVOKED",
+        delegatedCorrelationDelegation,
+        contradiction.credential,
+      )).evaluate({
+        ...delegatedCorrelationInput,
+        delegateIdentityCredential: contradiction.credential,
+        grantorCredential: contradiction.grantorCredential ?? staticCredential,
+      }));
+    });
+  }
+
+  await t.test("rejects full binding for malformed delegation integrity", async () => {
+    const malformedDelegation = {
+      ...delegatedCorrelationDelegation,
+      delegationBindingHash: HASH_0,
+    };
+    await expectInvalidResponse(() => delegatedDenialClient(
+      fullyBoundDelegatedDenial("DELEGATION_REVOKED", malformedDelegation),
+    ).evaluate({ ...delegatedCorrelationInput, delegation: malformedDelegation }));
+  });
+});
+
+test("SDK preserves a validated delegation snapshot for fully bound denials", async () => {
+  let idReads = 0;
+  const accessorDelegation = {
+    ...delegatedCorrelationDelegation,
+    get id(): string {
+      idReads += 1;
+      return idReads <= 2 ? delegatedCorrelationDelegation.id : "delegation:mutated-after-validation";
+    },
+  } as CapabilityDelegation;
+  const evaluated = await delegatedDenialClient(
+    fullyBoundDelegatedDenial("DELEGATION_REVOKED"),
+  ).evaluate({ ...delegatedCorrelationInput, delegation: accessorDelegation });
+
+  assert.equal(evaluated.decision.reasonCode, "DELEGATION_REVOKED");
+  assert.equal(evaluated.decision.delegationId, delegatedCorrelationDelegation.id);
+  assert.equal(evaluated.receipt, undefined);
 });
 
 test("SDK preserves a validated delegated credential snapshot after caller mutation", async () => {
