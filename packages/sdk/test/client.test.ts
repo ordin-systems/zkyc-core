@@ -417,6 +417,35 @@ test("SDK accepts real Hono delegated CREDENTIAL_UNKNOWN without trusted binding
   assert.equal("grantorId" in evaluated.decision, false);
 });
 
+test("SDK preserves real Hono server-authoritative revoked delegate credential denial", async () => {
+  const { client } = harness();
+  const fixture = await issueDelegatedFixture(client);
+  assert.deepEqual(await client.revokeCredential(fixture.delegateIdentityCredential.id, {
+    reason: "delegated-evaluation-test",
+  }), { revoked: true });
+
+  const evaluated = await client.evaluate({
+    authorityMode: "DELEGATED",
+    principal: fixture.delegate,
+    delegateIdentityCredential: fixture.delegateIdentityCredential,
+    grantorCredential: fixture.grantorCredential,
+    delegation: fixture.delegation,
+    action: "records:read",
+    resourceId: RESOURCE,
+    actionContext: { purpose: "sdk-revoked-delegate-credential" },
+    policy: fixture.delegatedPolicy,
+    issueReceipt: true,
+    receiptExpiresAt: ARTIFACT_EXPIRY,
+  });
+
+  assert.equal(evaluated.decision.outcome, "DENY");
+  assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_REVOKED");
+  assert.equal(evaluated.decision.actingCredentialId, fixture.delegateIdentityCredential.id);
+  assert.equal(evaluated.decision.effectiveScopeHash, fixture.delegateIdentityCredential.scopeHash);
+  assert.equal("grantorId" in evaluated.decision, false);
+  assert.equal(evaluated.receipt, undefined);
+});
+
 test("SDK accepts real Hono delegated acting-only DELEGATION_MALFORMED", async () => {
   const { client } = harness();
   const fixture = await issueDelegatedFixture(client);
@@ -985,6 +1014,309 @@ test("SDK preserves server-authoritative direct unknown and revoked denials", as
       assert.equal(evaluated.receipt, undefined);
     });
   }
+});
+
+const delegatedCorrelationPrincipal: Principal = {
+  id: "agent:delegated-correlation",
+  type: "AGENT",
+  affiliations: [],
+};
+const delegatedCredentialScope = {
+  capabilities: ["identity:act"],
+  allowedActions: ["records:read"],
+  allowedResourceIds: [RESOURCE],
+} as const;
+const delegatedCorrelationCredential: Credential = {
+  version: 2,
+  id: "credential:delegated-correlation",
+  issuerId: staticCredential.issuerId,
+  principalId: delegatedCorrelationPrincipal.id,
+  principalType: delegatedCorrelationPrincipal.type,
+  affiliations: [],
+  ...delegatedCredentialScope,
+  issuedAt: START,
+  expiresAt: EXPIRY,
+  scopeHash: computeScopeHash(delegatedCredentialScope),
+};
+const delegatedCorrelationScope = {
+  capabilities: ["records:read"],
+  allowedActions: ["records:read"],
+  allowedResourceIds: [RESOURCE],
+} as const;
+const delegatedCorrelationSeed: CapabilityDelegation = {
+  version: 1,
+  id: "delegation:correlation",
+  issuerId: staticCredential.issuerId,
+  grantorCredentialId: staticCredential.id,
+  grantorId: staticCredential.principalId,
+  grantorType: staticCredential.principalType,
+  delegateId: delegatedCorrelationPrincipal.id,
+  delegateType: delegatedCorrelationPrincipal.type,
+  policyId: staticPolicy.id,
+  policyVersion: staticPolicy.version,
+  ...delegatedCorrelationScope,
+  issuedAt: START,
+  expiresAt: EXPIRY,
+  scopeHash: computeScopeHash(delegatedCorrelationScope),
+  delegationBindingHash: HASH_0,
+};
+const delegatedCorrelationDelegation: CapabilityDelegation = {
+  ...delegatedCorrelationSeed,
+  delegationBindingHash: computeDelegationBindingHash(delegatedCorrelationSeed as never),
+};
+const delegatedCorrelationInput = {
+  authorityMode: "DELEGATED",
+  principal: delegatedCorrelationPrincipal,
+  delegateIdentityCredential: delegatedCorrelationCredential,
+  grantorCredential: staticCredential,
+  delegation: delegatedCorrelationDelegation,
+  action: staticDecision.action,
+  resourceId: staticDecision.resourceId,
+  actionContext: {},
+  policy: staticPolicyInput,
+  issueReceipt: false,
+} as const;
+const delegatedUnboundDenyDecision = {
+  ...staticDirectDenyDecision,
+  authorityMode: "DELEGATED",
+  subjectId: delegatedCorrelationPrincipal.id,
+  subjectType: delegatedCorrelationPrincipal.type,
+} as const;
+const delegatedActingOnlyDenyDecision = {
+  ...delegatedUnboundDenyDecision,
+  actingCredentialId: delegatedCorrelationCredential.id,
+  effectiveScopeHash: delegatedCorrelationCredential.scopeHash,
+} as const;
+
+function delegatedDenialClient(decision: unknown): ZkycReferenceClient {
+  return new ZkycReferenceClient({
+    baseUrl: "https://delegated-denial-correlation.reference",
+    fetch: () => Promise.resolve(jsonResponse({
+      logId: "decision-log:delegated-denial-correlation",
+      decision,
+    })),
+  });
+}
+
+test("SDK correlates delegated acting-stage unbound credential denials", async (t) => {
+  const malformedCredentials: readonly Credential[] = [
+    { ...delegatedCorrelationCredential, scopeHash: HASH_0 },
+    { ...delegatedCorrelationCredential, capabilities: null } as unknown as Credential,
+  ];
+
+  await t.test("rejects impossible CREDENTIAL_MISSING for a typed supplied credential", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...delegatedUnboundDenyDecision,
+      reasonCode: "CREDENTIAL_MISSING",
+    }).evaluate(delegatedCorrelationInput));
+  });
+
+  await t.test("rejects CREDENTIAL_MALFORMED for a structurally and integrity-valid credential", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...delegatedUnboundDenyDecision,
+      reasonCode: "CREDENTIAL_MALFORMED",
+    }).evaluate(delegatedCorrelationInput));
+  });
+
+  for (const [index, credential] of malformedCredentials.entries()) {
+    await t.test(`accepts CREDENTIAL_MALFORMED for malformed credential ${index + 1}`, async () => {
+      const evaluated = await delegatedDenialClient({
+        ...delegatedUnboundDenyDecision,
+        reasonCode: "CREDENTIAL_MALFORMED",
+      }).evaluate({ ...delegatedCorrelationInput, delegateIdentityCredential: credential });
+      assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_MALFORMED");
+      assert.equal(evaluated.receipt, undefined);
+    });
+  }
+
+  await t.test("accepts server-authoritative CREDENTIAL_UNKNOWN for a valid credential", async () => {
+    const evaluated = await delegatedDenialClient({
+      ...delegatedUnboundDenyDecision,
+      reasonCode: "CREDENTIAL_UNKNOWN",
+    }).evaluate(delegatedCorrelationInput);
+    assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_UNKNOWN");
+    assert.equal(evaluated.receipt, undefined);
+  });
+
+  await t.test("rejects CREDENTIAL_UNKNOWN for a malformed credential", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...delegatedUnboundDenyDecision,
+      reasonCode: "CREDENTIAL_UNKNOWN",
+    }).evaluate({
+      ...delegatedCorrelationInput,
+      delegateIdentityCredential: malformedCredentials[0]!,
+    }));
+  });
+});
+
+test("SDK correlates delegated acting-stage delegate credential inactivity denials", async (t) => {
+  const notYetValid = { ...delegatedCorrelationCredential, issuedAt: LATER };
+  const expired = {
+    ...delegatedCorrelationCredential,
+    issuedAt: "2026-05-31T23:00:00.000Z",
+    expiresAt: START,
+  };
+  const cases = [
+    { reasonCode: "CREDENTIAL_NOT_YET_VALID", credential: notYetValid },
+    { reasonCode: "CREDENTIAL_EXPIRED", credential: expired },
+    { reasonCode: "CREDENTIAL_REVOKED", credential: delegatedCorrelationCredential },
+  ] as const;
+
+  for (const control of cases) {
+    await t.test(`accepts ${control.reasonCode} only at its reachable time state`, async () => {
+      const decision = {
+        ...delegatedActingOnlyDenyDecision,
+        reasonCode: control.reasonCode,
+        actingCredentialId: control.credential.id,
+        effectiveScopeHash: control.credential.scopeHash,
+      };
+      const evaluated = await delegatedDenialClient(decision).evaluate({
+        ...delegatedCorrelationInput,
+        delegateIdentityCredential: control.credential,
+      });
+      assert.equal(evaluated.decision.reasonCode, control.reasonCode);
+      assert.equal(evaluated.receipt, undefined);
+    });
+  }
+
+  for (const reasonCode of ["CREDENTIAL_NOT_YET_VALID", "CREDENTIAL_EXPIRED"] as const) {
+    await t.test(`rejects false ${reasonCode} against an active credential`, async () => {
+      await expectInvalidResponse(() => delegatedDenialClient({
+        ...delegatedActingOnlyDenyDecision,
+        reasonCode,
+      }).evaluate(delegatedCorrelationInput));
+    });
+  }
+
+  for (const credential of [notYetValid, expired]) {
+    await t.test(`rejects CREDENTIAL_REVOKED before ${credential === notYetValid ? "issuance" : "expiry"}`, async () => {
+      await expectInvalidResponse(() => delegatedDenialClient({
+        ...delegatedActingOnlyDenyDecision,
+        reasonCode: "CREDENTIAL_REVOKED",
+      }).evaluate({ ...delegatedCorrelationInput, delegateIdentityCredential: credential }));
+    });
+  }
+});
+
+test("SDK correlates delegated acting-stage delegation denials", async (t) => {
+  await t.test("accepts identities-not-distinct only for equal delegate and grantor credential IDs", async () => {
+    const decision = {
+      ...delegatedActingOnlyDenyDecision,
+      reasonCode: "DELEGATION_IDENTITIES_NOT_DISTINCT",
+    } as const;
+    assert.equal(
+      (await delegatedDenialClient(decision).evaluate({
+        ...delegatedCorrelationInput,
+        grantorCredential: delegatedCorrelationCredential,
+      })).decision.reasonCode,
+      decision.reasonCode,
+    );
+    await expectInvalidResponse(() => delegatedDenialClient(decision).evaluate(delegatedCorrelationInput));
+  });
+
+  await t.test("rejects identities-not-distinct when grantor credential is an array with a forged ID", async () => {
+    const forgedArrayCredential = Object.assign([], {
+      id: delegatedCorrelationCredential.id,
+    }) as unknown as Credential;
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...delegatedActingOnlyDenyDecision,
+      reasonCode: "DELEGATION_IDENTITIES_NOT_DISTINCT",
+    }).evaluate({
+      ...delegatedCorrelationInput,
+      grantorCredential: forgedArrayCredential,
+    }));
+  });
+
+  const mismatchedCredentials: readonly Credential[] = [
+    { ...delegatedCorrelationCredential, principalId: "agent:other" },
+    { ...delegatedCorrelationCredential, principalType: "ORGANIZATION" },
+    {
+      ...delegatedCorrelationCredential,
+      affiliations: [{ organizationId: "organization:other", role: "member" }],
+    },
+  ];
+  for (const [index, credential] of mismatchedCredentials.entries()) {
+    await t.test(`accepts delegate mismatch for principal contradiction ${index + 1}`, async () => {
+      const decision = {
+        ...delegatedActingOnlyDenyDecision,
+        reasonCode: "DELEGATION_DELEGATE_MISMATCH",
+        actingCredentialId: credential.id,
+        effectiveScopeHash: credential.scopeHash,
+      } as const;
+      assert.equal(
+        (await delegatedDenialClient(decision).evaluate({
+          ...delegatedCorrelationInput,
+          delegateIdentityCredential: credential,
+        })).decision.reasonCode,
+        decision.reasonCode,
+      );
+    });
+  }
+  await t.test("rejects delegate mismatch when requested principal matches", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...delegatedActingOnlyDenyDecision,
+      reasonCode: "DELEGATION_DELEGATE_MISMATCH",
+    }).evaluate(delegatedCorrelationInput));
+  });
+
+  const malformedDelegations: readonly CapabilityDelegation[] = [
+    { ...delegatedCorrelationDelegation, scopeHash: HASH_0 },
+    { ...delegatedCorrelationDelegation, delegationBindingHash: HASH_0 },
+    { ...delegatedCorrelationDelegation, capabilities: null } as unknown as CapabilityDelegation,
+  ];
+  for (const [index, delegation] of malformedDelegations.entries()) {
+    await t.test(`accepts DELEGATION_MALFORMED for malformed delegation ${index + 1}`, async () => {
+      const evaluated = await delegatedDenialClient({
+        ...delegatedActingOnlyDenyDecision,
+        reasonCode: "DELEGATION_MALFORMED",
+      }).evaluate({ ...delegatedCorrelationInput, delegation });
+      assert.equal(evaluated.decision.reasonCode, "DELEGATION_MALFORMED");
+      assert.equal(evaluated.receipt, undefined);
+    });
+  }
+  await t.test("rejects DELEGATION_MALFORMED for a valid delegation", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...delegatedActingOnlyDenyDecision,
+      reasonCode: "DELEGATION_MALFORMED",
+    }).evaluate(delegatedCorrelationInput));
+  });
+
+  await t.test("accepts server-authoritative DELEGATION_UNKNOWN for a valid delegation", async () => {
+    const evaluated = await delegatedDenialClient({
+      ...delegatedActingOnlyDenyDecision,
+      reasonCode: "DELEGATION_UNKNOWN",
+    }).evaluate(delegatedCorrelationInput);
+    assert.equal(evaluated.decision.reasonCode, "DELEGATION_UNKNOWN");
+    assert.equal(evaluated.receipt, undefined);
+  });
+  await t.test("rejects DELEGATION_UNKNOWN for a malformed delegation", async () => {
+    await expectInvalidResponse(() => delegatedDenialClient({
+      ...delegatedActingOnlyDenyDecision,
+      reasonCode: "DELEGATION_UNKNOWN",
+    }).evaluate({ ...delegatedCorrelationInput, delegation: malformedDelegations[0]! }));
+  });
+});
+
+test("SDK preserves a validated delegated credential snapshot after caller mutation", async () => {
+  let idReads = 0;
+  const accessorCredential = {
+    ...delegatedCorrelationCredential,
+    get id(): string {
+      idReads += 1;
+      return idReads <= 2 ? delegatedCorrelationCredential.id : "credential:mutated-after-validation";
+    },
+  } as Credential;
+  const evaluated = await delegatedDenialClient({
+    ...delegatedActingOnlyDenyDecision,
+    reasonCode: "CREDENTIAL_REVOKED",
+  }).evaluate({
+    ...delegatedCorrelationInput,
+    delegateIdentityCredential: accessorCredential,
+  });
+
+  assert.equal(evaluated.decision.reasonCode, "CREDENTIAL_REVOKED");
+  assert.equal(evaluated.decision.actingCredentialId, delegatedCorrelationCredential.id);
+  assert.equal(evaluated.receipt, undefined);
 });
 
 test("SDK rejects accessor-backed credential mutation after validation without leaking raw errors", async () => {
