@@ -671,7 +671,7 @@ export interface ZkycReferenceClientOptions {
   readonly fetch?: FetchLike;
 }
 
-function requireResponseCorrelation(condition: boolean): void {
+function requireResponseCorrelation(condition: boolean): asserts condition {
   if (!condition) throw new InvalidProtocolResponse();
 }
 
@@ -790,10 +790,75 @@ function suppliedAuthoritySatisfiesRule(
     );
 }
 
+type DirectCredentialState =
+  | { readonly status: "MISSING" }
+  | { readonly status: "MALFORMED" }
+  | { readonly status: "VALID"; readonly credential: Credential };
+
+function directDenialMatchesRequest(
+  decision: AccessDecision,
+  rule: PolicyRule | undefined,
+  input: CredentialPresentDirectEvaluateRequest | CredentiallessDirectEvaluateRequest,
+  credentialState: DirectCredentialState,
+): boolean {
+  if (credentialState.status === "MISSING") {
+    return decision.reasonCode === "CREDENTIAL_MISSING";
+  }
+  if (credentialState.status === "MALFORMED") {
+    return decision.reasonCode === "CREDENTIAL_MALFORMED";
+  }
+  const credential = credentialState.credential;
+  if (
+    decision.reasonCode === "CREDENTIAL_MISSING" ||
+    decision.reasonCode === "CREDENTIAL_MALFORMED"
+  ) return false;
+  if (decision.reasonCode === "CREDENTIAL_UNKNOWN") return true;
+
+  const decidedAt = Date.parse(decision.decidedAt);
+  const issuedAt = Date.parse(credential.issuedAt);
+  const expiresAt = Date.parse(credential.expiresAt);
+  const notYetValid = decidedAt < issuedAt;
+  const expired = decidedAt >= expiresAt;
+  const active = !notYetValid && !expired;
+  if (decision.reasonCode === "CREDENTIAL_NOT_YET_VALID") return notYetValid;
+  if (decision.reasonCode === "CREDENTIAL_EXPIRED") return expired;
+  if (decision.reasonCode === "CREDENTIAL_REVOKED") return active;
+  if (!active) return false;
+
+  const subjectMatches = credential.principalId === input.principal.id &&
+    credential.principalType === input.principal.type &&
+    sameCanonicalAffiliations(credential.affiliations, input.principal.affiliations);
+  if (decision.reasonCode === "CREDENTIAL_SUBJECT_MISMATCH") return !subjectMatches;
+  if (!subjectMatches) return false;
+
+  const actionInScope = credential.allowedActions.includes(input.action);
+  if (decision.reasonCode === "ACTION_OUTSIDE_CREDENTIAL_SCOPE") return !actionInScope;
+  if (!actionInScope) return false;
+
+  const resourceInScope = credential.allowedResourceIds.includes(input.resourceId);
+  if (decision.reasonCode === "RESOURCE_OUTSIDE_CREDENTIAL_SCOPE") return !resourceInScope;
+  if (!resourceInScope) return false;
+
+  if (decision.reasonCode === "ACTION_NOT_PERMITTED") return rule === undefined;
+  if (rule === undefined) return false;
+  if (decision.reasonCode === "POLICY_DENY") return rule.effect === "DENY";
+  if (rule.effect === "DENY") return false;
+
+  const capabilitiesSatisfyRule = containsAll(credential.capabilities, rule.requiredCapabilities);
+  if (decision.reasonCode === "INSUFFICIENT_CAPABILITY") return !capabilitiesSatisfyRule;
+  if (!capabilitiesSatisfyRule) return false;
+
+  if (decision.reasonCode === "AFFILIATION_REQUIRED") {
+    return !containsAllAffiliations(credential.affiliations, rule.requiredAffiliations);
+  }
+  return false;
+}
+
 function decisionMatchesRequestedPolicy(
   decision: AccessDecision,
   policy: CanonicalPolicy,
   input: EvaluateRequest,
+  directCredentialState: DirectCredentialState | undefined,
 ): boolean {
   const rule = policy.rules.find((candidate) => candidate.action === decision.action);
   if (decision.actionSensitivity !== (rule?.actionSensitivity ?? "ROUTINE")) return false;
@@ -808,6 +873,11 @@ function decisionMatchesRequestedPolicy(
       rule?.effect === "STEP_UP" &&
       suppliedAuthoritySatisfiesRule(input, rule, decision.decidedAt) &&
       decision.requiredApproverCapability === rule.approverCapability;
+  }
+  if (input.authorityMode === "DIRECT") {
+    return directCredentialState !== undefined &&
+      decision.requiredApproverCapability === undefined &&
+      directDenialMatchesRequest(decision, rule, input, directCredentialState);
   }
   if (decision.reasonCode === "POLICY_DENY") return rule?.effect === "DENY";
   if (decision.reasonCode === "ACTION_NOT_PERMITTED") return rule === undefined;
@@ -981,6 +1051,21 @@ export class ZkycReferenceClient {
       const decision = response.decision;
       const expectedPolicy = await canonicalPolicy(input.policy);
       const expectedContextHash = await computeContextHash(input.actionContext);
+      let directCredentialState: DirectCredentialState | undefined;
+      if (input.authorityMode === "DIRECT") {
+        if (input.credential === null) {
+          directCredentialState = { status: "MISSING" };
+        } else {
+          try {
+            const credential = validateCredentialResponse({ credential: input.credential }).credential;
+            directCredentialState = credential.scopeHash === await computeScopeHash(credential)
+              ? { status: "VALID", credential }
+              : { status: "MALFORMED" };
+          } catch {
+            directCredentialState = { status: "MALFORMED" };
+          }
+        }
+      }
       requireResponseCorrelation(
         decision.authorityMode === input.authorityMode &&
         decision.subjectId === input.principal.id &&
@@ -990,7 +1075,12 @@ export class ZkycReferenceClient {
         decision.contextHash === expectedContextHash &&
         decision.policyId === input.policy.id &&
         decision.policyVersion === expectedPolicy.version &&
-        decisionMatchesRequestedPolicy(decision, expectedPolicy, input) &&
+        decisionMatchesRequestedPolicy(
+          decision,
+          expectedPolicy,
+          input,
+          directCredentialState,
+        ) &&
         (response.receipt === undefined
           ? !(input.issueReceipt && decision.outcome === "ALLOW")
           : input.issueReceipt &&
@@ -1004,22 +1094,23 @@ export class ZkycReferenceClient {
           decision.credentialId === undefined;
         if (isUnbound) {
           requireResponseCorrelation(
+            directCredentialState !== undefined &&
             decision.authorityMode === "DIRECT" &&
             decision.outcome === "DENY" &&
-            (input.credential === null
+            (directCredentialState.status === "MISSING"
               ? decision.reasonCode === "CREDENTIAL_MISSING"
-              : decision.reasonCode === "CREDENTIAL_MALFORMED" ||
-                decision.reasonCode === "CREDENTIAL_UNKNOWN") &&
+              : directCredentialState.status === "MALFORMED"
+              ? decision.reasonCode === "CREDENTIAL_MALFORMED"
+              : decision.reasonCode === "CREDENTIAL_UNKNOWN") &&
             response.receipt === undefined,
           );
         } else {
-          requireResponseCorrelation(input.credential !== null);
-          const expectedScopeHash = await computeScopeHash(input.credential as Credential);
+          requireResponseCorrelation(directCredentialState?.status === "VALID");
+          const credential = directCredentialState.credential;
           requireResponseCorrelation(
             decision.authorityMode === "DIRECT" &&
-            decision.actingCredentialId === input.credential?.id &&
-            input.credential?.scopeHash === expectedScopeHash &&
-            decision.effectiveScopeHash === expectedScopeHash,
+            decision.actingCredentialId === credential.id &&
+            decision.effectiveScopeHash === credential.scopeHash,
           );
         }
       } else {
